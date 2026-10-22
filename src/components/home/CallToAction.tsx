@@ -3,7 +3,7 @@ import Link from "next/link";
 export function CallToAction() {
   return (
     <section id="enterprise" className="w-full py-20 bg-white dark:bg-zinc-950">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full px-4 sm:px-6 lg:px-8">
         <div className="relative overflow-hidden rounded-3xl bg-zinc-950 px-6 py-16 text-white shadow-2xl sm:px-12 sm:py-20 lg:px-16 dark:bg-zinc-900 border border-zinc-800">
           {/* Subtle background glow */}
           <div

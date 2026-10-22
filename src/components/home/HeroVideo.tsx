@@ -31,7 +31,7 @@ export function HeroVideo() {
 
   return (
     <section className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
-      <div className="mx-auto max-w-7xl relative overflow-hidden rounded-3xl sm:rounded-[2.5rem] bg-zinc-950 p-8 sm:p-12 lg:p-16 min-h-[560px] sm:min-h-[620px] lg:min-h-[660px] flex flex-col justify-between shadow-2xl border border-zinc-800/80">
+      <div className="mx-auto max-w-full relative overflow-hidden rounded-3xl sm:rounded-[2.5rem] bg-zinc-950 p-8 sm:p-12 lg:p-16 min-h-[560px] sm:min-h-[620px] lg:min-h-[660px] flex flex-col justify-between shadow-2xl border border-zinc-800/80">
         {/* Background Video with absolute cover */}
         <video
           autoPlay

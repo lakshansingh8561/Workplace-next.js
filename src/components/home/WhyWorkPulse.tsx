@@ -40,7 +40,7 @@ export function WhyWorkPulse() {
 
   return (
     <section id="why-workpulse" className="w-full bg-zinc-50/60 py-20 dark:bg-zinc-950">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
             Why WorkPulse

@@ -41,7 +41,7 @@ export function CategorySection() {
 
   return (
     <section id="categories" className="w-full py-20 bg-zinc-50/50 dark:bg-zinc-950/40">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full px-4 sm:px-6 lg:px-8">
         {/* Section Heading & Filter Tabs */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-8 border-b border-zinc-200 dark:border-zinc-800">
           <div>

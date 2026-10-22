@@ -18,7 +18,7 @@ export default function Home() {
       {/* 2. Interactive Search & Platform Metrics Section */}
       <section
         id="search-section"
-        className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-2 sm:-mt-4 mb-6 relative z-20"
+        className="w-full mx-auto px-4 sm:px-6 lg:px-8 -mt-2 sm:-mt-4 mb-6 relative z-20"
       >
         <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 sm:p-8 shadow-xl shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900/90 dark:shadow-none">
           {/* Section Subtitle */}

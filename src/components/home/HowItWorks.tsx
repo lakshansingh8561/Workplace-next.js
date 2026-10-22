@@ -4,7 +4,7 @@ import { HOW_IT_WORKS_STEPS } from "@/data";
 export function HowItWorks() {
   return (
     <section id="how-it-works" className="w-full py-20 bg-white dark:bg-zinc-900/50">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-zinc-200 pb-10 dark:border-zinc-800">
           <div>
             <h2 className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
