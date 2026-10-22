@@ -1,0 +1,63 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum PaymentType {
+  HOURLY
+  FIXED
+}
+
+enum ExperienceLevel {
+  ENTRY
+  INTERMEDIATE
+  EXPERT
+}
+
+enum JobStatus {
+  DRAFT
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CLOSED
+}
+
+model Job {
+  id                    String          @id @default(auto()) @map("_id") @db.ObjectId
+  title                 String
+  description           String
+  category              String
+  skills                String[]
+  type                  PaymentType     @default(FIXED)
+  budget                Float?
+  hourlyMin             Float?
+  hourlyMax             Float?
+  duration              String?
+  experienceLevel       ExperienceLevel @default(INTERMEDIATE)
+  status                JobStatus       @default(OPEN)
+  proposalsCount        Int             @default(0)
+
+  // Client Snapshot
+  clientName            String?
+  clientCountry         String?
+  clientRating          Float?          @default(5.0)
+  clientSpent           Float?          @default(0)
+  clientPaymentVerified Boolean         @default(true)
+
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([category])
+  @@index([status])
+  @@index([type])
+  @@index([experienceLevel])
+  @@index([createdAt])
+  @@map("jobs")
+}
