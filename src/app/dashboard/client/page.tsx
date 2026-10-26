@@ -97,6 +97,7 @@ async function ClientDashboardContent({
 
   return (
     <ClientDashboardView
+      key={`${statusParam || "ALL"}-${searchQuery}-${page}`}
       jobs={jobs}
       totalJobs={totalJobs}
       currentPage={page}

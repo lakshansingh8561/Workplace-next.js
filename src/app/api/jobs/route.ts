@@ -4,8 +4,8 @@ import { ZodError } from "zod";
 
 /**
  * GET /api/jobs
- * Returns a paginated list of jobs with support for search, category,
- * type, experience level, and sorting.
+ * Returns a paginated list of discoverable OPEN jobs with support for search,
+ * category, contract type, experience level, skill, budget range, and deterministic sorting.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -16,17 +16,23 @@ export async function GET(request: NextRequest) {
       category: searchParams.get("category") || undefined,
       type: searchParams.get("type") || undefined,
       experienceLevel: searchParams.get("experienceLevel") || undefined,
+      skill: searchParams.get("skill") || undefined,
+      skills: searchParams.get("skills") || undefined,
+      minBudget: searchParams.get("minBudget") || undefined,
+      maxBudget: searchParams.get("maxBudget") || undefined,
       sortBy: searchParams.get("sortBy") || "newest",
       page: searchParams.get("page") || "1",
       limit: searchParams.get("limit") || "10",
+      includeFacets: searchParams.get("includeFacets") || undefined,
     };
 
-    const { data, pagination, source } = await getJobs(queryParams);
+    const { data, pagination, facets, source } = await getJobs(queryParams);
 
     return NextResponse.json(
       {
         data,
         pagination,
+        ...(facets ? { facets } : {}),
       },
       {
         status: 200,

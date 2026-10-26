@@ -4,31 +4,78 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Job, JobApiResponse } from "@/types";
 import { SessionUser } from "@/lib/session";
-import { FreelancerProposalSummary } from "@/lib/actions/proposal";
+import {
+  FreelancerProposalSummary,
+  getFreelancerProposalForJob,
+} from "@/lib/actions/proposal";
 import { ApplyProposalModal } from "./ApplyProposalModal";
+import { SaveJobButton } from "./SaveJobButton";
+import { isSafeHttpUrl } from "@/lib/validations/profile";
 
 interface JobDetailsViewProps {
   jobId: string;
+  initialJob?: Job | null;
   initialUser?: SessionUser | null;
   initialProposal?: FreelancerProposalSummary | null;
+  initialSaved?: boolean;
 }
 
 export function JobDetailsView({
   jobId,
+  initialJob,
   initialUser,
   initialProposal,
+  initialSaved = false,
 }: JobDetailsViewProps) {
-  const [job, setJob] = useState<Job | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [fetchedJob, setFetchedJob] = useState<Job | null>(null);
+  const [clientUser, setClientUser] = useState<SessionUser | null>(null);
+  const [submittedProposal, setSubmittedProposal] = useState<FreelancerProposalSummary>(null);
+  const [isLoading, setIsLoading] = useState(!initialJob);
   const [error, setError] = useState<string | null>(null);
-  const [user] = useState<SessionUser | null>(initialUser ?? null);
-  const [userProposal, setUserProposal] = useState<FreelancerProposalSummary>(
-    initialProposal ?? null
-  );
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
+  // Directly derive values from initial props with fallback to client state
+  const job = fetchedJob ?? initialJob ?? null;
+  const user = initialUser ?? clientUser;
+  const userProposal = submittedProposal !== null ? submittedProposal : (initialProposal ?? null);
+
+  // Client-side session fallback if initialUser was not passed or null
   useEffect(() => {
+    if (!initialUser && !clientUser) {
+      fetch("/api/auth/session")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((session) => {
+          if (session?.user?.id) {
+            setClientUser({
+              id: session.user.id,
+              name: session.user.name,
+              email: session.user.email,
+              image: session.user.image,
+              role: session.user.role || "CLIENT",
+              roleSelected: session.user.roleSelected !== false,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [initialUser, clientUser]);
+
+  // If user is a freelancer and userProposal is not yet populated, verify if already applied
+  useEffect(() => {
+    if (user?.role === "FREELANCER" && userProposal === null && jobId) {
+      getFreelancerProposalForJob(jobId)
+        .then((p) => {
+          if (p) setSubmittedProposal(p);
+        })
+        .catch(() => {});
+    }
+  }, [user?.role, userProposal, jobId]);
+
+  useEffect(() => {
+    // Only fetch via API if initialJob wasn't provided or job is missing
+    if (initialJob || fetchedJob) return;
+
     async function loadJob() {
       try {
         const res = await fetch(`/api/jobs/${jobId}`, {
@@ -46,7 +93,7 @@ export function JobDetailsView({
 
         const json: JobApiResponse = await res.json();
         if (json.data) {
-          setJob(json.data);
+          setFetchedJob(json.data);
         } else {
           setError("Job data is empty");
         }
@@ -61,7 +108,7 @@ export function JobDetailsView({
     if (jobId) {
       loadJob();
     }
-  }, [jobId]);
+  }, [jobId, initialJob, fetchedJob]);
 
   if (isLoading) {
     return (
@@ -109,6 +156,10 @@ export function JobDetailsView({
   const isOtherClient = Boolean(user && user.role === "CLIENT" && job.clientId !== user.id);
   const isFreelancer = Boolean(user && user.role === "FREELANCER");
   const isUnauthenticated = !user;
+  const isJobOpen = job.status.toUpperCase() === "OPEN";
+  const isJobPaused = job.status.toUpperCase() === "PAUSED";
+  const isJobClosed =
+    job.status.toUpperCase() === "CLOSED" || job.status.toUpperCase() === "COMPLETED";
 
   const handleProposalSuccess = (proposalSummary: {
     id: string;
@@ -117,8 +168,11 @@ export function JobDetailsView({
     estimatedDuration?: string | null;
     createdAt: string;
   }) => {
-    setUserProposal(proposalSummary);
-    setJob((prev) => (prev ? { ...prev, proposalsCount: prev.proposalsCount + 1 } : null));
+    setSubmittedProposal(proposalSummary);
+    setFetchedJob((prev) => {
+      const current = prev || job;
+      return current ? { ...current, proposalsCount: current.proposalsCount + 1 } : null;
+    });
     setShowApplyModal(false);
     setSuccessBanner("Your proposal was successfully submitted! The client will review your application.");
   };
@@ -158,9 +212,21 @@ export function JobDetailsView({
           <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 sm:p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
             {/* Header info */}
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400 pb-3 border-b border-zinc-100 dark:border-zinc-800">
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                {job.category}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  {job.category}
+                </span>
+                {isJobClosed && (
+                  <span className="rounded-full bg-zinc-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                    Closed
+                  </span>
+                )}
+                {isJobPaused && (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
+                    Paused
+                  </span>
+                )}
+              </div>
               <span>
                 Posted {new Date(job.createdAt).toLocaleDateString("en-US", {
                   month: "long",
@@ -170,9 +236,19 @@ export function JobDetailsView({
               </span>
             </div>
 
-            <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-950 dark:text-white">
-              {job.title}
-            </h1>
+            <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-950 dark:text-white flex-1 min-w-[240px]">
+                {job.title}
+              </h1>
+              <SaveJobButton
+                jobId={job.id}
+                initialSaved={initialSaved}
+                variant="button"
+                size="md"
+                userRole={user?.role}
+                className="shrink-0"
+              />
+            </div>
 
             {/* Contract Specs Grid */}
             <div className="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-4 rounded-2xl bg-zinc-50 p-4 border border-zinc-100 dark:bg-zinc-800/50 dark:border-zinc-800 text-xs">
@@ -229,111 +305,214 @@ export function JobDetailsView({
         <div className="lg:col-span-1 space-y-6">
           {/* Apply / Proposal CTA Card */}
           <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
-            {/* Case A: Unauthenticated */}
-            {isUnauthenticated && (
-              <div className="space-y-3">
-                <Link
-                  href={`/login?redirectTo=${encodeURIComponent(`/jobs/${job.id}`)}`}
-                  className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                >
-                  Sign in to Apply
-                </Link>
-                <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
-                  Sign in with a Freelancer account to submit proposals for this job.
-                </p>
-              </div>
-            )}
-
-            {/* Case B: Job Owner Client */}
-            {isOwnerClient && (
-              <div className="space-y-3">
-                <div className="rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-2">
-                  <span>⭐</span>
-                  <span>You posted this job</span>
-                </div>
-                <Link
-                  href={`/dashboard/client/jobs/${job.id}/proposals`}
-                  className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500 active:scale-95"
-                >
-                  Review Proposals ({job.proposalsCount}) →
-                </Link>
-                <p className="text-center text-xs text-zinc-500">
-                  Manage applications and select freelancers for your project.
-                </p>
-              </div>
-            )}
-
-            {/* Case C: Other Client */}
-            {isOtherClient && (
-              <div className="rounded-2xl bg-zinc-50 p-4 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700 text-xs space-y-2">
-                <p className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5">
-                  <span>ℹ️</span> Client Account
-                </p>
-                <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                  You are signed in as a client. Only freelancer accounts can submit proposals to marketplace contracts.
-                </p>
-              </div>
-            )}
-
-            {/* Case D: Freelancer already submitted */}
-            {isFreelancer && userProposal && (
-              <div className="space-y-3">
-                <div className="rounded-2xl bg-zinc-50 p-4 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700 text-xs space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-zinc-700 dark:text-zinc-300">
-                      Application Status
-                    </span>
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] ${
-                        userProposal.status === "ACCEPTED"
-                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300"
-                          : userProposal.status === "REJECTED"
-                          ? "bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-300"
-                          : "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300"
-                      }`}
-                    >
-                      {userProposal.status}
+            {/* State 1: Job Closed */}
+            {isJobClosed && (
+              <div className="space-y-4">
+                <div className="rounded-2xl bg-zinc-100 p-4 border border-zinc-200 dark:bg-zinc-800/60 dark:border-zinc-700 text-xs space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-2 w-2 rounded-full bg-zinc-500" />
+                    <span className="font-bold text-zinc-900 dark:text-white uppercase tracking-wider text-[11px]">
+                      Job Closed
                     </span>
                   </div>
-
-                  <div className="space-y-1.5 pt-2 border-t border-zinc-200/80 dark:border-zinc-700">
-                    <div className="flex justify-between text-zinc-500 dark:text-zinc-400">
-                      <span>Your Proposed Rate:</span>
-                      <span className="font-bold text-zinc-900 dark:text-white">
-                        ${userProposal.bidAmount} {isHourly ? "/ hr" : ""}
+                  <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                    This contract has been filled or closed. It is no longer accepting new proposals.
+                  </p>
+                </div>
+                {isOwnerClient && (
+                  <Link
+                    href={`/dashboard/client/jobs/${job.id}/proposals`}
+                    className="w-full inline-flex items-center justify-center rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+                  >
+                    Review Proposals ({job.proposalsCount}) →
+                  </Link>
+                )}
+                {isFreelancer && userProposal && (
+                  <div className="rounded-2xl bg-zinc-50 p-3.5 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-zinc-600 dark:text-zinc-400">Your Proposal:</span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full font-bold uppercase text-[10px] ${
+                          userProposal.status === "ACCEPTED"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300"
+                            : userProposal.status === "REJECTED"
+                            ? "bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-300"
+                            : "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300"
+                        }`}
+                      >
+                        {userProposal.status}
                       </span>
                     </div>
-                    {userProposal.estimatedDuration && (
-                      <div className="flex justify-between text-zinc-500 dark:text-zinc-400">
-                        <span>Duration:</span>
-                        <span className="font-semibold text-zinc-900 dark:text-white">
-                          {userProposal.estimatedDuration}
-                        </span>
-                      </div>
-                    )}
                   </div>
-                </div>
-
-                <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900 text-center font-medium">
-                  ✓ Proposal active and submitted to client
-                </div>
+                )}
               </div>
             )}
 
-            {/* Case E: Freelancer eligible to submit */}
-            {isFreelancer && !userProposal && (
-              <div className="space-y-3">
-                <button
-                  type="button"
-                  onClick={() => setShowApplyModal(true)}
-                  className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                >
-                  Apply for this Job
-                </button>
-                <p className="text-center text-xs text-zinc-500">
-                  {job.proposalsCount} proposals already submitted
-                </p>
+            {/* State 2: Job Paused */}
+            {isJobPaused && (
+              <div className="space-y-4">
+                <div className="rounded-2xl bg-amber-50 p-4 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 text-xs space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span className="font-bold text-amber-900 dark:text-amber-300 uppercase tracking-wider text-[11px]">
+                      Contract Paused
+                    </span>
+                  </div>
+                  <p className="text-amber-800 dark:text-amber-200 leading-relaxed">
+                    The client has temporarily paused applications for this job. New proposals cannot be submitted at this time.
+                  </p>
+                </div>
+                {isOwnerClient && (
+                  <Link
+                    href={`/dashboard/client/jobs/${job.id}/proposals`}
+                    className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500"
+                  >
+                    Manage Proposals ({job.proposalsCount}) →
+                  </Link>
+                )}
+                {isFreelancer && userProposal && (
+                  <div className="rounded-2xl bg-zinc-50 p-3.5 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-zinc-600 dark:text-zinc-400">Your Proposal:</span>
+                      <span className="px-2 py-0.5 rounded-full font-bold uppercase text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
+                        {userProposal.status}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
+            )}
+
+            {/* State 3: Job Open */}
+            {isJobOpen && (
+              <>
+                {/* Case A: Unauthenticated */}
+                {isUnauthenticated && (
+                  <div className="space-y-3">
+                    <Link
+                      href={`/login?redirectTo=${encodeURIComponent(`/jobs/${job.id}`)}`}
+                      className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                    >
+                      Sign in to Apply
+                    </Link>
+                    <p className="text-center text-xs text-zinc-500 dark:text-zinc-400">
+                      Sign in with a Freelancer account to submit proposals for this job.
+                    </p>
+                  </div>
+                )}
+
+                {/* Case B: Job Owner Client */}
+                {isOwnerClient && (
+                  <div className="space-y-3">
+                    <div className="rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-2">
+                      <span>⭐</span>
+                      <span>You posted this job</span>
+                    </div>
+                    <Link
+                      href={`/dashboard/client/jobs/${job.id}/proposals`}
+                      className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500 active:scale-95"
+                    >
+                      Review Proposals ({job.proposalsCount}) →
+                    </Link>
+                    <p className="text-center text-xs text-zinc-500">
+                      Manage applications and select freelancers for your project.
+                    </p>
+                  </div>
+                )}
+
+                {/* Case C: Other Client */}
+                {isOtherClient && (
+                  <div className="rounded-2xl bg-zinc-50 p-4 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700 text-xs space-y-2">
+                    <p className="font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5">
+                      <span>ℹ️</span> Client Account
+                    </p>
+                    <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                      You are signed in as a client. Only freelancer accounts can submit proposals to marketplace contracts.
+                    </p>
+                  </div>
+                )}
+
+                {/* Case D: Freelancer pending role onboarding */}
+                {isFreelancer && user && !user.roleSelected && (
+                  <div className="space-y-3">
+                    <div className="rounded-2xl bg-amber-50 p-4 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 text-xs space-y-2">
+                      <p className="font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                        <span>⚠️</span> Profile Setup Required
+                      </p>
+                      <p className="text-amber-800 dark:text-amber-200 leading-relaxed">
+                        Please complete role onboarding before applying to contracts.
+                      </p>
+                    </div>
+                    <Link
+                      href="/onboarding/role"
+                      className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500"
+                    >
+                      Complete Onboarding →
+                    </Link>
+                  </div>
+                )}
+
+                {/* Case E: Freelancer already submitted */}
+                {isFreelancer && user && user.roleSelected && userProposal && (
+                  <div className="space-y-3">
+                    <div className="rounded-2xl bg-zinc-50 p-4 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700 text-xs space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-zinc-700 dark:text-zinc-300">
+                          Application Status
+                        </span>
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] ${
+                            userProposal.status === "ACCEPTED"
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300"
+                              : userProposal.status === "REJECTED"
+                              ? "bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-300"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300"
+                          }`}
+                        >
+                          {userProposal.status}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 pt-2 border-t border-zinc-200/80 dark:border-zinc-700">
+                        <div className="flex justify-between text-zinc-500 dark:text-zinc-400">
+                          <span>Your Proposed Rate:</span>
+                          <span className="font-bold text-zinc-900 dark:text-white">
+                            ${userProposal.bidAmount} {isHourly ? "/ hr" : ""}
+                          </span>
+                        </div>
+                        {userProposal.estimatedDuration && (
+                          <div className="flex justify-between text-zinc-500 dark:text-zinc-400">
+                            <span>Duration:</span>
+                            <span className="font-semibold text-zinc-900 dark:text-white">
+                              {userProposal.estimatedDuration}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900 text-center font-medium">
+                      ✓ Proposal active and submitted to client
+                    </div>
+                  </div>
+                )}
+
+                {/* Case F: Freelancer eligible to submit */}
+                {isFreelancer && user && user.roleSelected && !userProposal && (
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowApplyModal(true)}
+                      className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                    >
+                      Apply for this Job
+                    </button>
+                    <p className="text-center text-xs text-zinc-500">
+                      {job.proposalsCount} proposals already submitted
+                    </p>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Escrow badge */}
@@ -357,17 +536,43 @@ export function JobDetailsView({
 
             <div className="mt-4 space-y-3 text-xs text-zinc-600 dark:text-zinc-300">
               <div>
-                <p className="text-zinc-400 font-medium">Organization</p>
+                <p className="text-zinc-400 font-medium">Organization / Company</p>
                 <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
-                  {job.clientName || "Enterprise Client"}
+                  {job.client?.companyName || job.clientName || "Enterprise Client"}
                 </p>
+                {job.client?.companyIndustry && (
+                  <span className="inline-block mt-1 rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                    {job.client.companyIndustry}
+                  </span>
+                )}
               </div>
 
-              {job.clientCountry && (
+              {job.client?.companyWebsite && (
+                <div>
+                  <p className="text-zinc-400 font-medium">Website</p>
+                  {isSafeHttpUrl(job.client.companyWebsite) ? (
+                    <a
+                      href={job.client.companyWebsite}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 hover:underline mt-0.5 inline-flex items-center gap-1"
+                    >
+                      <span>{job.client.companyWebsite.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
+                      <span>↗</span>
+                    </a>
+                  ) : (
+                    <span className="font-semibold text-zinc-400 mt-0.5 text-xs italic">
+                      {job.client.companyWebsite} (unverified)
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {(job.client?.location || job.clientCountry) && (
                 <div>
                   <p className="text-zinc-400 font-medium">Location</p>
                   <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
-                    📍 {job.clientCountry}
+                    📍 {job.client?.location || job.clientCountry}
                   </p>
                 </div>
               )}

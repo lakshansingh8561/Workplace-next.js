@@ -13,7 +13,9 @@ import {
   SignupSchema,
   LoginSchema,
   SelectRoleSchema,
+  sanitizeRedirectPath,
 } from "@/lib/validations/auth";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 export type AuthActionResult = {
   success: boolean;
@@ -39,6 +41,7 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
       }
     });
     return {
+      
       success: false,
       error: "Please correct the highlighted errors.",
       fieldErrors,
@@ -46,6 +49,19 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
   }
 
   const { name, email, password, role } = result.data;
+
+  // Rate limit registration requests by IP (5 attempts per 10 minutes)
+  const clientIp = await getClientIp();
+  const rateLimit = await checkRateLimit(`signup:${clientIp}`, {
+    limit: 5,
+    windowMs: 600_000,
+  });
+  if (!rateLimit.success) {
+    return {
+      success: false,
+      error: "Too many accounts created from this IP. Please try again later.",
+    };
+  }
 
   try {
     const existing = await prisma.user.findUnique({
@@ -195,10 +211,19 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
   }
 
   const { email, password, redirectTo } = result.data;
+  const destination = sanitizeRedirectPath(redirectTo);
 
-  let destination = "/jobs";
-  if (redirectTo && redirectTo.startsWith("/") && !redirectTo.startsWith("//")) {
-    destination = redirectTo;
+  // Rate limit login attempts by IP and email (5 attempts per minute)
+  const clientIp = await getClientIp();
+  const rateLimit = await checkRateLimit(`login:${clientIp}:${email.toLowerCase()}`, {
+    limit: 5,
+    windowMs: 60_000,
+  });
+  if (!rateLimit.success) {
+    return {
+      success: false,
+      error: "Too many login attempts. Please wait 1 minute before trying again.",
+    };
   }
 
   try {
@@ -248,10 +273,7 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
  * Server Action to initiate Google OAuth sign-in.
  */
 export async function loginWithGoogleAction(redirectTo?: string) {
-  let destination = "/jobs";
-  if (redirectTo && redirectTo.startsWith("/") && !redirectTo.startsWith("//")) {
-    destination = redirectTo;
-  }
+  const destination = sanitizeRedirectPath(redirectTo);
   await signIn("google", { redirectTo: destination });
 }
 

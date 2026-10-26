@@ -8,8 +8,9 @@ import {
   OBJECT_ID_REGEX,
 } from "@/lib/validations/message";
 import { createNotificationSafe } from "@/lib/actions/notification";
-import { NotificationType } from "@prisma/client";
+import { NotificationType, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export type ChatMessageDto = {
   id: string;
@@ -21,7 +22,7 @@ export type ChatMessageDto = {
   sender: {
     id: string;
     name: string | null;
-    email: string | null;
+    image?: string | null;
     role?: string | null;
   };
 };
@@ -42,17 +43,19 @@ export type ConversationSummaryDto = {
   client: {
     id: string;
     name: string | null;
-    email: string | null;
+    image?: string | null;
+    role?: string | null;
   };
   freelancer: {
     id: string;
     name: string | null;
-    email: string | null;
+    image?: string | null;
+    role?: string | null;
   };
   counterparty: {
     id: string;
     name: string | null;
-    email: string | null;
+    image?: string | null;
     role: "CLIENT" | "FREELANCER";
   };
 };
@@ -73,6 +76,14 @@ export async function getOrCreateConversationForContractAction(
     };
   }
 
+  // Verify caller has completed onboarding with a valid role
+  if (!user.roleSelected || (user.role !== "CLIENT" && user.role !== "FREELANCER")) {
+    return {
+      success: false,
+      error: "Please complete onboarding before accessing contract messaging.",
+    };
+  }
+
   if (!contractId || !OBJECT_ID_REGEX.test(contractId)) {
     return {
       success: false,
@@ -85,6 +96,7 @@ export async function getOrCreateConversationForContractAction(
       where: { id: contractId },
       select: {
         id: true,
+        status: true,
         clientId: true,
         freelancerId: true,
       },
@@ -97,10 +109,14 @@ export async function getOrCreateConversationForContractAction(
       };
     }
 
-    if (contract.clientId !== user.id && contract.freelancerId !== user.id) {
+    // Strictly enforce relationship to the contract and appropriate role alignment
+    const isClientParticipant = contract.clientId === user.id && user.role === "CLIENT";
+    const isFreelancerParticipant = contract.freelancerId === user.id && user.role === "FREELANCER";
+
+    if (!isClientParticipant && !isFreelancerParticipant) {
       return {
         success: false,
-        error: "Forbidden: You are not a participant in this contract.",
+        error: "Forbidden: You are not an authorized participant in this contract.",
       };
     }
 
@@ -111,15 +127,37 @@ export async function getOrCreateConversationForContractAction(
     });
 
     if (!conversation) {
-      conversation = await prisma.conversation.create({
-        data: {
-          contractId: contract.id,
-          clientId: contract.clientId,
-          freelancerId: contract.freelancerId,
-          lastMessageAt: new Date(),
-        },
-        select: { id: true },
-      });
+      try {
+        conversation = await prisma.conversation.create({
+          data: {
+            contractId: contract.id,
+            clientId: contract.clientId,
+            freelancerId: contract.freelancerId,
+            lastMessageAt: new Date(),
+          },
+          select: { id: true },
+        });
+      } catch (createErr) {
+        // Concurrency guard: if a concurrent request already created the conversation, resolve it safely
+        if (
+          createErr instanceof Prisma.PrismaClientKnownRequestError &&
+          createErr.code === "P2002"
+        ) {
+          conversation = await prisma.conversation.findUnique({
+            where: { contractId: contract.id },
+            select: { id: true },
+          });
+        } else {
+          throw createErr;
+        }
+      }
+    }
+
+    if (!conversation) {
+      return {
+        success: false,
+        error: "Failed to establish conversation thread.",
+      };
     }
 
     return {
@@ -127,7 +165,10 @@ export async function getOrCreateConversationForContractAction(
       conversationId: conversation.id,
     };
   } catch (error) {
-    console.error("Error getting or creating conversation:", error);
+    console.error(
+      "[WorkPulse Messaging Error]:",
+      error instanceof Error ? error.message : "Database error"
+    );
     return {
       success: false,
       error: "Failed to load contract conversation.",
@@ -173,14 +214,16 @@ export async function getConversationsAction(): Promise<{
           select: {
             id: true,
             name: true,
-            email: true,
+            image: true,
+            role: true,
           },
         },
         freelancer: {
           select: {
             id: true,
             name: true,
-            email: true,
+            image: true,
+            role: true,
           },
         },
         messages: {
@@ -210,13 +253,13 @@ export async function getConversationsAction(): Promise<{
           ? {
               id: c.freelancer.id,
               name: c.freelancer.name,
-              email: c.freelancer.email,
+              image: c.freelancer.image,
               role: "FREELANCER" as const,
             }
           : {
               id: c.client.id,
               name: c.client.name,
-              email: c.client.email,
+              image: c.client.image,
               role: "CLIENT" as const,
             };
 
@@ -274,7 +317,7 @@ export async function getMessagesAction(
     counterparty: {
       id: string;
       name: string | null;
-      email: string | null;
+      image?: string | null;
       role: "CLIENT" | "FREELANCER";
     };
   };
@@ -312,14 +355,16 @@ export async function getMessagesAction(
           select: {
             id: true,
             name: true,
-            email: true,
+            image: true,
+            role: true,
           },
         },
         freelancer: {
           select: {
             id: true,
             name: true,
-            email: true,
+            image: true,
+            role: true,
           },
         },
       },
@@ -358,7 +403,7 @@ export async function getMessagesAction(
           select: {
             id: true,
             name: true,
-            email: true,
+            image: true,
             role: true,
           },
         },
@@ -382,13 +427,13 @@ export async function getMessagesAction(
       ? {
           id: conversation.freelancer.id,
           name: conversation.freelancer.name,
-          email: conversation.freelancer.email,
+          image: conversation.freelancer.image,
           role: "FREELANCER" as const,
         }
       : {
           id: conversation.client.id,
           name: conversation.client.name,
-          email: conversation.client.email,
+          image: conversation.client.image,
           role: "CLIENT" as const,
         };
 
@@ -440,6 +485,18 @@ export async function sendMessageAction(
     return {
       success: false,
       error: "Unauthorized: You must be signed in to send messages.",
+    };
+  }
+
+  // Rate limit messages (max 30 messages per 60 seconds per user)
+  const rateLimit = await checkRateLimit(`message:${user.id}`, {
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (!rateLimit.success) {
+    return {
+      success: false,
+      error: "You are sending messages too quickly. Please wait a moment before sending more.",
     };
   }
 
@@ -513,7 +570,7 @@ export async function sendMessageAction(
           select: {
             id: true,
             name: true,
-            email: true,
+            image: true,
             role: true,
           },
         },
@@ -555,7 +612,10 @@ export async function sendMessageAction(
       },
     };
   } catch (error) {
-    console.error("Error creating message:", error);
+    console.error(
+      "[WorkPulse Send Message Error]:",
+      error instanceof Error ? error.message : "Database error"
+    );
     return {
       success: false,
       error: "Failed to deliver message. Please try again.",

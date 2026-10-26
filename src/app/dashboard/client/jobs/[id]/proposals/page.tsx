@@ -9,8 +9,8 @@ import { Role } from "@prisma/client";
 import {
   ClientProposalReview,
   ReviewJobSummary,
-  ReviewProposalItem,
 } from "@/components/dashboard/ClientProposalReview";
+import { getJobProposalsForReview } from "@/lib/actions/proposal";
 import Link from "next/link";
 
 interface ClientProposalsPageProps {
@@ -85,30 +85,6 @@ async function ProposalsReviewContent({ params }: ClientProposalsPageProps) {
     );
   }
 
-  const rawProposals = await prisma.proposal.findMany({
-    where: { jobId: job.id },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      jobId: true,
-      freelancerId: true,
-      coverLetter: true,
-      bidAmount: true,
-      estimatedDuration: true,
-      status: true,
-      createdAt: true,
-      freelancer: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          image: true,
-          createdAt: true,
-        },
-      },
-    },
-  });
-
   const jobSummary: ReviewJobSummary = {
     id: job.id,
     title: job.title,
@@ -121,23 +97,8 @@ async function ProposalsReviewContent({ params }: ClientProposalsPageProps) {
     createdAt: job.createdAt.toISOString(),
   };
 
-  const proposals: ReviewProposalItem[] = rawProposals.map((p) => ({
-    id: p.id,
-    jobId: p.jobId,
-    freelancerId: p.freelancerId,
-    coverLetter: p.coverLetter,
-    bidAmount: p.bidAmount,
-    estimatedDuration: p.estimatedDuration,
-    status: p.status as "PENDING" | "ACCEPTED" | "REJECTED",
-    createdAt: p.createdAt.toISOString(),
-    freelancer: {
-      id: p.freelancer.id,
-      name: p.freelancer.name,
-      email: p.freelancer.email,
-      image: p.freelancer.image,
-      createdAt: p.freelancer.createdAt?.toISOString(),
-    },
-  }));
+  const reviewResult = await getJobProposalsForReview(job.id);
+  const proposals = reviewResult.proposals;
 
   return <ClientProposalReview job={jobSummary} initialProposals={proposals} />;
 }

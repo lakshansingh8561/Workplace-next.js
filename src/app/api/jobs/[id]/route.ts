@@ -37,6 +37,18 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       );
     }
 
+    // DRAFT jobs are private to the client owner
+    if (job.status === "DRAFT") {
+      const { getCurrentUser } = await import("@/lib/session");
+      const user = await getCurrentUser();
+      if (!user || job.clientId !== user.id) {
+        return NextResponse.json(
+          { error: `Job with ID '${id}' was not found` },
+          { status: 404 }
+        );
+      }
+    }
+
     return NextResponse.json(
       { data: job },
       {

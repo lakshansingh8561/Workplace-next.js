@@ -9,6 +9,7 @@ import {
   ContractDetailsView,
   ContractDetail,
 } from "@/components/contracts/ContractDetailsView";
+import { getContractReviewsData } from "@/lib/actions/review";
 import Link from "next/link";
 
 interface ContractDetailPageProps {
@@ -55,14 +56,16 @@ async function ContractDetailContent({ params }: ContractDetailPageProps) {
         select: {
           id: true,
           name: true,
-          email: true,
+          image: true,
+          role: true,
         },
       },
       freelancer: {
         select: {
           id: true,
           name: true,
-          email: true,
+          image: true,
+          role: true,
         },
       },
       milestones: {
@@ -140,11 +143,14 @@ async function ContractDetailContent({ params }: ContractDetailPageProps) {
     })),
   };
 
+  const reviewData = await getContractReviewsData(rawContract.id, user.id);
+
   return (
     <ContractDetailsView
       contract={contract}
       currentUserId={user.id}
       currentUserRole={user.role}
+      reviewData={reviewData}
     />
   );
 }

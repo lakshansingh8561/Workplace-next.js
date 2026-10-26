@@ -1,11 +1,20 @@
 import Link from "next/link";
 import { Job } from "@/types";
+import { SaveJobButton } from "./SaveJobButton";
 
 interface JobCardProps {
   job: Job;
+  isSaved?: boolean;
+  userRole?: string | null;
+  onToggleSave?: (isSaved: boolean) => void;
 }
 
-export function JobCard({ job }: JobCardProps) {
+export function JobCard({
+  job,
+  isSaved = false,
+  userRole,
+  onToggleSave,
+}: JobCardProps) {
   const isHourly = job.type.toUpperCase() === "HOURLY";
 
   const formattedPay = isHourly
@@ -23,17 +32,29 @@ export function JobCard({ job }: JobCardProps) {
     <article className="group relative rounded-2xl border border-zinc-200/90 bg-white p-6 shadow-sm transition-all hover:border-emerald-500/70 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/90">
       <div className="flex flex-col gap-3">
         {/* Top meta row */}
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-          <span className="font-medium text-emerald-700 dark:text-emerald-400">
-            {job.category}
-          </span>
-          <span>
-            {new Date(job.createdAt).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })}
-          </span>
+        <div className="flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+              {job.category}
+            </span>
+            <span>•</span>
+            <span>
+              {new Date(job.createdAt).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </span>
+          </div>
+
+          <SaveJobButton
+            jobId={job.id}
+            initialSaved={isSaved}
+            variant="icon"
+            size="sm"
+            userRole={userRole}
+            onToggle={onToggleSave}
+          />
         </div>
 
         {/* Title */}

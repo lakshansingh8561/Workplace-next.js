@@ -10,6 +10,8 @@ import {
   updateContractStatusAction,
 } from "@/lib/actions/contract";
 import { ContractStatus, MilestoneStatus, PaymentType } from "@prisma/client";
+import { ContractReviewSection } from "@/components/contracts/ContractReviewSection";
+import type { ContractReviewData } from "@/lib/actions/review";
 
 export interface DetailMilestone {
   id: string;
@@ -37,12 +39,14 @@ export interface ContractDetail {
   client: {
     id: string;
     name?: string | null;
-    email?: string | null;
+    image?: string | null;
+    role?: string | null;
   };
   freelancer: {
     id: string;
     name?: string | null;
-    email?: string | null;
+    image?: string | null;
+    role?: string | null;
   };
   milestones: DetailMilestone[];
 }
@@ -51,12 +55,14 @@ interface ContractDetailsViewProps {
   contract: ContractDetail;
   currentUserId: string;
   currentUserRole: "CLIENT" | "FREELANCER";
+  reviewData?: ContractReviewData;
 }
 
 export function ContractDetailsView({
   contract: initialContract,
   currentUserId,
   currentUserRole,
+  reviewData,
 }: ContractDetailsViewProps) {
   const router = useRouter();
   const [contract, setContract] = useState<ContractDetail>(initialContract);
@@ -326,8 +332,8 @@ export function ContractDetailsView({
             <span className="text-zinc-500 dark:text-zinc-400 font-medium">Counterparty:</span>
             <p className="font-bold text-zinc-900 dark:text-white mt-0.5 text-sm">
               {isClient
-                ? contract.freelancer.name || contract.freelancer.email?.split("@")[0] || "Freelancer"
-                : contract.client.name || contract.client.email?.split("@")[0] || "Client"}
+                ? contract.freelancer.name || "Freelancer"
+                : contract.client.name || "Client"}
             </p>
             <span className="text-[11px] text-zinc-400">
               {isClient ? "Assigned Freelancer" : "Project Client"}
@@ -641,6 +647,22 @@ export function ContractDetailsView({
           </div>
         )}
       </div>
+
+      {/* Contract Ratings & Reviews Section */}
+      {reviewData && (
+        <ContractReviewSection
+          contractId={contract.id}
+          contractTitle={contract.title}
+          contractStatus={contract.status}
+          counterpartName={
+            isClient
+              ? contract.freelancer.name || "Freelancer"
+              : contract.client.name || "Client"
+          }
+          counterpartRole={isClient ? "Freelancer" : "Client"}
+          initialReviewData={reviewData}
+        />
+      )}
     </div>
   );
 }

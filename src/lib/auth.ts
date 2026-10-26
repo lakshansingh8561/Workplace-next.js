@@ -8,15 +8,25 @@ import { z } from "zod";
 import { Role } from "@/types";
 
 const authSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
-if (!authSecret) {
-  if (process.env.NODE_ENV === "production") {
-    console.error("[WorkPulse Auth Error] AUTH_SECRET or NEXTAUTH_SECRET is required in production.");
-  } else {
-    console.warn(
-      "[WorkPulse Auth Warning] Neither AUTH_SECRET nor NEXTAUTH_SECRET is configured. Using a local development fallback secret. Please add AUTH_SECRET to .env for production security."
-    );
-  }
+
+if (process.env.NODE_ENV === "production" && !authSecret) {
+  throw new Error(
+    "[WorkPulse Auth Fatal] Production deployment requires AUTH_SECRET or NEXTAUTH_SECRET to be configured in environment variables."
+  );
 }
+
+if (!authSecret) {
+  console.warn(
+    "[WorkPulse Auth Warning] Neither AUTH_SECRET nor NEXTAUTH_SECRET is configured. Using a local development fallback secret. Please add AUTH_SECRET to .env for production security."
+  );
+}
+
+// In production, strictly use verified environment secret. In non-production, allow local dev fallback.
+const resolvedSecret =
+  authSecret ||
+  (process.env.NODE_ENV !== "production"
+    ? "workpulse-marketplace-local-development-secret-key-32chars"
+    : undefined);
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || "";
@@ -44,7 +54,7 @@ const customAdapter = {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: customAdapter,
-  secret: authSecret || "workpulse-marketplace-local-development-secret-key-32chars",
+  secret: resolvedSecret,
   session: {
     strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60, // 30 days
@@ -120,7 +130,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         );
         if (!isEmailVerified) {
           console.warn(
-            `[WorkPulse Auth] Google sign-in rejected for unverified email: ${user.email}`
+            "[WorkPulse Auth] Google sign-in rejected: unverified email address"
           );
           return "/login?error=UnverifiedEmail";
         }
@@ -141,13 +151,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               );
               if (!hasGoogleLinked) {
                 console.warn(
-                  `[WorkPulse Auth] Google sign-in conflict for existing credentials user: ${user.email}`
+                  "[WorkPulse Auth] Google sign-in conflict: account already registered with credentials"
                 );
                 return "/login?error=OAuthAccountNotLinked";
               }
             }
           } catch (err) {
-            console.error("[WorkPulse Auth Error] Account check error:", err);
+            console.error(
+              "[WorkPulse Auth Error] Account check error:",
+              err instanceof Error ? err.message : "Database error"
+            );
           }
         }
       }

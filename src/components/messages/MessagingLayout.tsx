@@ -58,11 +58,11 @@ export function MessagingLayout({
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-      <div className="overflow-hidden rounded-3xl border border-zinc-200/90 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-900 h-[750px] max-h-[85vh] flex">
+      <div className="overflow-hidden rounded-3xl border border-zinc-200/90 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-900 h-[calc(100vh-9.5rem)] min-h-[580px] max-h-[820px] flex">
         {/* Left Column: Conversation List */}
         <div
-          className={`w-full md:w-80 lg:w-96 flex-shrink-0 h-full ${
-            activeConversationId ? "hidden md:flex" : "flex"
+          className={`w-full md:w-80 lg:w-96 flex-shrink-0 h-full border-r border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-900 ${
+            activeConversationId ? "hidden md:flex md:flex-col" : "flex flex-col"
           }`}
         >
           <ConversationList
@@ -74,7 +74,7 @@ export function MessagingLayout({
 
         {/* Right Column: Chat Room or Empty State */}
         <div
-          className={`flex-1 h-full min-w-0 ${
+          className={`flex-1 h-full min-w-0 overflow-hidden bg-white dark:bg-zinc-900 ${
             activeConversationId ? "flex flex-col" : "hidden md:flex md:flex-col"
           }`}
         >

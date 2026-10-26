@@ -30,7 +30,7 @@ export function ChatRoom({
     counterparty: {
       id: string;
       name: string | null;
-      email: string | null;
+      image?: string | null;
       role: "CLIENT" | "FREELANCER";
     };
   } | null>(null);
@@ -40,10 +40,15 @@ export function ChatRoom({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSending, startSendTransition] = useTransition();
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    messagesEndRef.current?.scrollIntoView({ behavior });
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior,
+      });
+    }
   }, []);
 
   // Initial load when conversationId changes
@@ -174,9 +179,9 @@ export function ChatRoom({
   };
 
   return (
-    <div className="flex flex-col h-full bg-zinc-50/50 dark:bg-zinc-950">
+    <div className="flex flex-col h-full w-full min-w-0 overflow-hidden bg-zinc-50/90 dark:bg-zinc-950">
       {/* Thread Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 shrink-0 min-w-0">
         <div className="flex items-center gap-3 min-w-0">
           {onBackToList && (
             <button
@@ -194,14 +199,17 @@ export function ChatRoom({
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white flex-shrink-0">
                 {conversation.counterparty.name
                   ? conversation.counterparty.name.charAt(0).toUpperCase()
-                  : conversation.counterparty.email?.charAt(0).toUpperCase() || "U"}
+                  : conversation.counterparty.role === "CLIENT"
+                  ? "C"
+                  : "F"}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-zinc-900 dark:text-white truncate">
                     {conversation.counterparty.name ||
-                      conversation.counterparty.email?.split("@")[0] ||
-                      "Contract Partner"}
+                      (conversation.counterparty.role === "CLIENT"
+                        ? "Client"
+                        : "Freelancer")}
                   </h3>
                   <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
                     {conversation.counterparty.role === "CLIENT"
@@ -250,7 +258,10 @@ export function ChatRoom({
       </div>
 
       {/* Messages Feed */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-4 min-w-0"
+      >
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-full space-y-2">
             <div className="h-6 w-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
@@ -323,7 +334,7 @@ export function ChatRoom({
                     <span className="text-[10px] font-bold text-zinc-500">
                       {isMe
                         ? "You"
-                        : m.sender.name || m.sender.email?.split("@")[0] || "Partner"}
+                        : m.sender.name || (m.sender.role === "CLIENT" ? "Client" : "Freelancer")}
                     </span>
                     <span className="text-[10px] text-zinc-400">
                       {formatMessageTime(m.createdAt)}
@@ -356,11 +367,10 @@ export function ChatRoom({
             );
           })
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Composer */}
-      <div className="p-3 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800">
+      <div className="p-3 sm:p-4 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 shrink-0 min-w-0">
         <form onSubmit={handleSendMessage} className="space-y-2">
           <div className="relative">
             <textarea

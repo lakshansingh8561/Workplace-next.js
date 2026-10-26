@@ -19,9 +19,8 @@ export function ConversationList({
   const filtered = conversations.filter((c) => {
     const q = searchQuery.toLowerCase();
     const nameMatch = c.counterparty.name?.toLowerCase().includes(q);
-    const emailMatch = c.counterparty.email?.toLowerCase().includes(q);
     const contractMatch = c.contract.title.toLowerCase().includes(q);
-    return nameMatch || emailMatch || contractMatch;
+    return nameMatch || contractMatch;
   });
 
   const formatSnippetTime = (isoString: string) => {
@@ -45,9 +44,9 @@ export function ConversationList({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800">
+    <div className="flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-zinc-900">
       {/* Header & Search */}
-      <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+      <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 shrink-0 w-full min-w-0">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-extrabold text-zinc-900 dark:text-white">
             Messages
@@ -57,7 +56,7 @@ export function ConversationList({
           </span>
         </div>
 
-        <div className="relative">
+        <div className="relative w-full min-w-0">
           <input
             type="text"
             value={searchQuery}
@@ -82,7 +81,7 @@ export function ConversationList({
       </div>
 
       {/* Conversations Scroll Area */}
-      <div className="flex-1 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800/60">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-zinc-100 dark:divide-zinc-800/60 w-full min-w-0">
         {filtered.length === 0 ? (
           <div className="p-8 text-center text-zinc-500 dark:text-zinc-400">
             <span className="text-2xl block mb-2">💬</span>
@@ -103,18 +102,20 @@ export function ConversationList({
                 key={c.id}
                 type="button"
                 onClick={() => onSelectConversation(c.id)}
-                className={`w-full text-left p-4 transition-colors flex items-start gap-3 focus-visible:outline-none focus-visible:bg-zinc-100 dark:focus-visible:bg-zinc-800 ${
+                className={`w-full max-w-full text-left p-3.5 sm:p-4 transition-colors flex items-start gap-3 overflow-hidden focus-visible:outline-none focus-visible:bg-zinc-100 dark:focus-visible:bg-zinc-800 ${
                   isActive
                     ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-l-4 border-emerald-600 pl-3"
                     : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                 }`}
               >
                 {/* Avatar */}
-                <div className="relative flex-shrink-0">
+                <div className="relative shrink-0">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white shadow-xs">
                     {c.counterparty.name
                       ? c.counterparty.name.charAt(0).toUpperCase()
-                      : c.counterparty.email?.charAt(0).toUpperCase() || "U"}
+                      : c.counterparty.role === "CLIENT"
+                      ? "C"
+                      : "F"}
                   </div>
                   {c.unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-emerald-600 px-1 text-[9px] font-bold text-white shadow-xs">
@@ -124,27 +125,27 @@ export function ConversationList({
                 </div>
 
                 {/* Details */}
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 overflow-hidden">
                   <div className="flex items-center justify-between gap-1 mb-0.5">
-                    <span className="text-xs font-bold text-zinc-900 dark:text-white truncate">
-                      {c.counterparty.name || c.counterparty.email?.split("@")[0] || "User"}
+                    <span className="text-xs font-bold text-zinc-900 dark:text-white truncate block">
+                      {c.counterparty.name || (c.counterparty.role === "CLIENT" ? "Client" : "Freelancer")}
                     </span>
-                    <span className="text-[10px] text-zinc-400 whitespace-nowrap">
+                    <span className="text-[10px] text-zinc-400 shrink-0 whitespace-nowrap">
                       {formatSnippetTime(c.lastMessageAt)}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="rounded bg-zinc-100 px-1.5 py-0.2 text-[9px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                  <div className="flex items-center gap-1.5 mb-1 overflow-hidden">
+                    <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 shrink-0">
                       {c.counterparty.role === "CLIENT" ? "Client" : "Freelancer"}
                     </span>
-                    <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 truncate">
+                    <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 truncate block">
                       {c.contract.title}
                     </span>
                   </div>
 
                   <p
-                    className={`text-[11px] truncate ${
+                    className={`text-[11px] truncate block ${
                       c.unreadCount > 0
                         ? "font-semibold text-zinc-900 dark:text-zinc-100"
                         : "text-zinc-500 dark:text-zinc-400"

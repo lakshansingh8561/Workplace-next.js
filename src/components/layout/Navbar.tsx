@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, Suspense, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logoutUser } from "@/lib/actions/auth";
@@ -11,29 +11,23 @@ interface NavbarProps {
   user?: SessionUser | null;
 }
 
-export function Navbar({ user }: NavbarProps) {
+function getHash() {
+  return typeof window !== "undefined" ? window.location.hash : "";
+}
+
+function subscribeToHash(callback: () => void) {
+  window.addEventListener("hashchange", callback);
+  return () => window.removeEventListener("hashchange", callback);
+}
+
+function useActiveNav() {
   const pathname = usePathname();
-  const [currentHash, setCurrentHash] = useState("");
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [manualHash, setManualHash] = useState("");
+  const externalHash = useSyncExternalStore(subscribeToHash, getHash, () => "");
+  const currentHash = manualHash || externalHash;
 
-  useEffect(() => {
-    setCurrentHash(typeof window !== "undefined" ? window.location.hash : "");
-    const handleHash = () => {
-      setCurrentHash(window.location.hash);
-    };
-    window.addEventListener("hashchange", handleHash);
-    return () => window.removeEventListener("hashchange", handleHash);
-  }, [pathname]);
-
-  const closeMenu = () => {
-    setIsMobileMenuOpen(false);
-    setIsUserMenuOpen(false);
-  };
-
-  const handleSignOut = async () => {
-    closeMenu();
-    await logoutUser();
+  const setCurrentHash = (h: string) => {
+    setManualHash(h);
   };
 
   const isNavActive = (href: string) => {
@@ -46,14 +40,23 @@ export function Navbar({ user }: NavbarProps) {
       }
       return false;
     }
+    if (href === "/jobs/saved") {
+      return pathname === "/jobs/saved";
+    }
     if (href === "/jobs") {
       return (
         pathname === "/jobs" ||
-        (pathname.startsWith("/jobs") && !pathname.startsWith("/jobs/new"))
+        (pathname.startsWith("/jobs") && !pathname.startsWith("/jobs/new") && pathname !== "/jobs/saved")
       );
     }
-    if (href.startsWith("/dashboard")) {
-      return pathname.startsWith("/dashboard");
+    if (href === "/dashboard/client") {
+      return pathname.startsWith("/dashboard/client");
+    }
+    if (
+      href === "/dashboard/freelancer/proposals" ||
+      href === "/dashboard/freelancer"
+    ) {
+      return pathname.startsWith("/dashboard/freelancer");
     }
     if (href.startsWith("/contracts")) {
       return pathname.startsWith("/contracts");
@@ -64,6 +67,97 @@ export function Navbar({ user }: NavbarProps) {
     return pathname === href;
   };
 
+  return { isNavActive, setCurrentHash };
+}
+
+function DesktopNavList({
+  user,
+  getLinkClass,
+  onHashClick,
+}: {
+  user?: SessionUser | null;
+  getLinkClass: (href: string) => string;
+  onHashClick?: (hash: string) => void;
+}) {
+  return user ? (
+    <>
+      <Link
+        href={user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"}
+        className={getLinkClass(
+          user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"
+        )}
+      >
+        {user.role === "CLIENT" ? "Dashboard" : "My Proposals"}
+      </Link>
+      <Link href="/jobs" className={getLinkClass("/jobs")}>
+        Find Work
+      </Link>
+      {user.role === "FREELANCER" && (
+        <Link href="/jobs/saved" className={getLinkClass("/jobs/saved")}>
+          Saved Jobs
+        </Link>
+      )}
+      <Link
+        href="/#categories"
+        onClick={() => onHashClick?.("#categories")}
+        className={getLinkClass("/#categories")}
+      >
+        Find Talent
+      </Link>
+      <Link href="/contracts" className={getLinkClass("/contracts")}>
+        Contracts
+      </Link>
+      <Link href="/messages" className={getLinkClass("/messages")}>
+        Messages
+      </Link>
+      <Link
+        href="/#enterprise"
+        onClick={() => onHashClick?.("#enterprise")}
+        className={`hidden 2xl:inline-block ${getLinkClass("/#enterprise")}`}
+      >
+        Enterprise
+      </Link>
+    </>
+  ) : (
+    <>
+      <Link
+        href="/#categories"
+        onClick={() => onHashClick?.("#categories")}
+        className={getLinkClass("/#categories")}
+      >
+        Find Talent
+      </Link>
+      <Link href="/jobs" className={getLinkClass("/jobs")}>
+        Find Work
+      </Link>
+      <Link
+        href="/#how-it-works"
+        onClick={() => onHashClick?.("#how-it-works")}
+        className={getLinkClass("/#how-it-works")}
+      >
+        How It Works
+      </Link>
+      <Link
+        href="/#why-workpulse"
+        onClick={() => onHashClick?.("#why-workpulse")}
+        className={getLinkClass("/#why-workpulse")}
+      >
+        Why WorkPulse
+      </Link>
+      <Link
+        href="/#enterprise"
+        onClick={() => onHashClick?.("#enterprise")}
+        className={getLinkClass("/#enterprise")}
+      >
+        Enterprise
+      </Link>
+    </>
+  );
+}
+
+function DesktopNavLinks({ user }: { user?: SessionUser | null }) {
+  const { isNavActive, setCurrentHash } = useActiveNav();
+
   const getDesktopLinkClass = (href: string) => {
     const active = isNavActive(href);
     return `transition-colors rounded px-1 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
@@ -73,6 +167,147 @@ export function Navbar({ user }: NavbarProps) {
     }`;
   };
 
+  return (
+    <DesktopNavList
+      user={user}
+      getLinkClass={getDesktopLinkClass}
+      onHashClick={setCurrentHash}
+    />
+  );
+}
+
+function DesktopNavListStatic({ user }: { user?: SessionUser | null }) {
+  const getStaticClass = () =>
+    "transition-colors rounded px-1 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 text-zinc-600 dark:text-zinc-300 font-medium hover:text-emerald-600 dark:hover:text-emerald-400";
+
+  return <DesktopNavList user={user} getLinkClass={getStaticClass} />;
+}
+
+function MobileNavList({
+  user,
+  closeMenu,
+  getLinkClass,
+  onHashClick,
+}: {
+  user?: SessionUser | null;
+  closeMenu: () => void;
+  getLinkClass: (href: string) => string;
+  onHashClick?: (hash: string) => void;
+}) {
+  return user ? (
+    <>
+      <Link
+        href={user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"}
+        onClick={closeMenu}
+        className={getLinkClass(
+          user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"
+        )}
+      >
+        {user.role === "CLIENT" ? "Dashboard" : "My Proposals"}
+      </Link>
+      <Link
+        href="/contracts"
+        onClick={closeMenu}
+        className={getLinkClass("/contracts")}
+      >
+        Contracts & Milestones
+      </Link>
+      <Link
+        href="/messages"
+        onClick={closeMenu}
+        className={getLinkClass("/messages")}
+      >
+        Messages
+      </Link>
+      <Link
+        href="/jobs"
+        onClick={closeMenu}
+        className={getLinkClass("/jobs")}
+      >
+        Find Work
+      </Link>
+      {user.role === "FREELANCER" && (
+        <Link
+          href="/jobs/saved"
+          onClick={closeMenu}
+          className={getLinkClass("/jobs/saved")}
+        >
+          Saved Jobs
+        </Link>
+      )}
+      <Link
+        href="/#categories"
+        onClick={() => {
+          onHashClick?.("#categories");
+          closeMenu();
+        }}
+        className={getLinkClass("/#categories")}
+      >
+        Find Talent
+      </Link>
+    </>
+  ) : (
+    <>
+      <Link
+        href="/#categories"
+        onClick={() => {
+          onHashClick?.("#categories");
+          closeMenu();
+        }}
+        className={getLinkClass("/#categories")}
+      >
+        Find Talent
+      </Link>
+      <Link
+        href="/jobs"
+        onClick={closeMenu}
+        className={getLinkClass("/jobs")}
+      >
+        Find Work
+      </Link>
+      <Link
+        href="/#how-it-works"
+        onClick={() => {
+          onHashClick?.("#how-it-works");
+          closeMenu();
+        }}
+        className={getLinkClass("/#how-it-works")}
+      >
+        How It Works
+      </Link>
+      <Link
+        href="/#why-workpulse"
+        onClick={() => {
+          onHashClick?.("#why-workpulse");
+          closeMenu();
+        }}
+        className={getLinkClass("/#why-workpulse")}
+      >
+        Why WorkPulse
+      </Link>
+      <Link
+        href="/#enterprise"
+        onClick={() => {
+          onHashClick?.("#enterprise");
+          closeMenu();
+        }}
+        className={getLinkClass("/#enterprise")}
+      >
+        Enterprise
+      </Link>
+    </>
+  );
+}
+
+function MobileNavLinks({
+  user,
+  closeMenu,
+}: {
+  user?: SessionUser | null;
+  closeMenu: () => void;
+}) {
+  const { isNavActive, setCurrentHash } = useActiveNav();
+
   const getMobileLinkClass = (href: string) => {
     const active = isNavActive(href);
     return `rounded-md px-3 py-2 text-base transition-colors ${
@@ -80,6 +315,43 @@ export function Navbar({ user }: NavbarProps) {
         ? "bg-emerald-50 text-emerald-600 font-semibold dark:bg-emerald-950/40 dark:text-emerald-400"
         : "font-medium text-zinc-700 hover:bg-zinc-50 hover:text-emerald-600 dark:text-zinc-200 dark:hover:bg-zinc-900"
     }`;
+  };
+
+  return (
+    <MobileNavList
+      user={user}
+      closeMenu={closeMenu}
+      getLinkClass={getMobileLinkClass}
+      onHashClick={setCurrentHash}
+    />
+  );
+}
+
+function MobileNavListStatic({
+  user,
+  closeMenu,
+}: {
+  user?: SessionUser | null;
+  closeMenu: () => void;
+}) {
+  const getStaticClass = () =>
+    "rounded-md px-3 py-2 text-base font-medium text-zinc-700 hover:bg-zinc-50 hover:text-emerald-600 dark:text-zinc-200 dark:hover:bg-zinc-900 transition-colors";
+
+  return <MobileNavList user={user} closeMenu={closeMenu} getLinkClass={getStaticClass} />;
+}
+
+export function Navbar({ user }: NavbarProps) {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+
+  const closeMenu = () => {
+    setIsMobileMenuOpen(false);
+    setIsUserMenuOpen(false);
+  };
+
+  const handleSignOut = async () => {
+    closeMenu();
+    await logoutUser();
   };
 
   return (
@@ -105,87 +377,9 @@ export function Navbar({ user }: NavbarProps) {
             aria-label="Main Navigation"
             className="hidden lg:flex items-center gap-4 xl:gap-6 text-sm font-medium min-w-0"
           >
-            {user ? (
-              /* Authenticated User Nav Links */
-              <>
-                <Link
-                  href={user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer"}
-                  className={getDesktopLinkClass("/dashboard")}
-                >
-                  {user.role === "CLIENT" ? "Dashboard" : "My Proposals"}
-                </Link>
-                <Link
-                  href="/jobs"
-                  className={getDesktopLinkClass("/jobs")}
-                >
-                  Find Work
-                </Link>
-                <Link
-                  href="/#categories"
-                  onClick={() => setCurrentHash("#categories")}
-                  className={getDesktopLinkClass("/#categories")}
-                >
-                  Find Talent
-                </Link>
-                <Link
-                  href="/contracts"
-                  className={getDesktopLinkClass("/contracts")}
-                >
-                  Contracts
-                </Link>
-                <Link
-                  href="/messages"
-                  className={getDesktopLinkClass("/messages")}
-                >
-                  Messages
-                </Link>
-                <Link
-                  href="/#enterprise"
-                  onClick={() => setCurrentHash("#enterprise")}
-                  className={`hidden 2xl:inline-block ${getDesktopLinkClass("/#enterprise")}`}
-                >
-                  Enterprise
-                </Link>
-              </>
-            ) : (
-              /* Guest Navigation Links */
-              <>
-                <Link
-                  href="/#categories"
-                  onClick={() => setCurrentHash("#categories")}
-                  className={getDesktopLinkClass("/#categories")}
-                >
-                  Find Talent
-                </Link>
-                <Link
-                  href="/jobs"
-                  className={getDesktopLinkClass("/jobs")}
-                >
-                  Find Work
-                </Link>
-                <Link
-                  href="/#how-it-works"
-                  onClick={() => setCurrentHash("#how-it-works")}
-                  className={getDesktopLinkClass("/#how-it-works")}
-                >
-                  How It Works
-                </Link>
-                <Link
-                  href="/#why-workpulse"
-                  onClick={() => setCurrentHash("#why-workpulse")}
-                  className={getDesktopLinkClass("/#why-workpulse")}
-                >
-                  Why WorkPulse
-                </Link>
-                <Link
-                  href="/#enterprise"
-                  onClick={() => setCurrentHash("#enterprise")}
-                  className={getDesktopLinkClass("/#enterprise")}
-                >
-                  Enterprise
-                </Link>
-              </>
-            )}
+            <Suspense fallback={<DesktopNavListStatic user={user} />}>
+              <DesktopNavLinks user={user} />
+            </Suspense>
           </nav>
         </div>
 
@@ -280,6 +474,15 @@ export function Navbar({ user }: NavbarProps) {
                           <span>Messages</span>
                         </Link>
                         <Link
+                          href="/profile/client"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>🏢</span>
+                          <span>Company Profile</span>
+                        </Link>
+                        <Link
                           href="/jobs/new"
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
@@ -292,13 +495,40 @@ export function Navbar({ user }: NavbarProps) {
                     ) : (
                       <>
                         <Link
-                          href="/dashboard/freelancer"
+                          href="/dashboard/freelancer/proposals"
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
                         >
                           <span>📑</span>
                           <span>My Proposals</span>
+                        </Link>
+                        <Link
+                          href="/jobs/saved"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>📌</span>
+                          <span>Saved Jobs</span>
+                        </Link>
+                        <Link
+                          href="/profile/freelancer"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>👤</span>
+                          <span>Profile Settings</span>
+                        </Link>
+                        <Link
+                          href={`/freelancers/${user.id}`}
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>🌐</span>
+                          <span>Public Profile</span>
                         </Link>
                         <Link
                           href="/contracts"
@@ -453,7 +683,7 @@ export function Navbar({ user }: NavbarProps) {
                   </div>
                 </div>
                 <Link
-                  href={user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer"}
+                  href={user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"}
                   onClick={closeMenu}
                   className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 shrink-0"
                 >
@@ -483,91 +713,9 @@ export function Navbar({ user }: NavbarProps) {
               </Link>
             )}
 
-            {user ? (
-              <>
-                <Link
-                  href="/contracts"
-                  onClick={closeMenu}
-                  className={getMobileLinkClass("/contracts")}
-                >
-                  Contracts & Milestones
-                </Link>
-                <Link
-                  href="/messages"
-                  onClick={closeMenu}
-                  className={getMobileLinkClass("/messages")}
-                >
-                  Messages
-                </Link>
-                <Link
-                  href="/jobs"
-                  onClick={closeMenu}
-                  className={getMobileLinkClass("/jobs")}
-                >
-                  Find Work
-                </Link>
-                <Link
-                  href="/#categories"
-                  onClick={() => {
-                    setCurrentHash("#categories");
-                    closeMenu();
-                  }}
-                  className={getMobileLinkClass("/#categories")}
-                >
-                  Find Talent
-                </Link>
-              </>
-            ) : (
-              <>
-                <Link
-                  href="/#categories"
-                  onClick={() => {
-                    setCurrentHash("#categories");
-                    closeMenu();
-                  }}
-                  className={getMobileLinkClass("/#categories")}
-                >
-                  Find Talent
-                </Link>
-                <Link
-                  href="/jobs"
-                  onClick={closeMenu}
-                  className={getMobileLinkClass("/jobs")}
-                >
-                  Find Work
-                </Link>
-                <Link
-                  href="/#how-it-works"
-                  onClick={() => {
-                    setCurrentHash("#how-it-works");
-                    closeMenu();
-                  }}
-                  className={getMobileLinkClass("/#how-it-works")}
-                >
-                  How It Works
-                </Link>
-                <Link
-                  href="/#why-workpulse"
-                  onClick={() => {
-                    setCurrentHash("#why-workpulse");
-                    closeMenu();
-                  }}
-                  className={getMobileLinkClass("/#why-workpulse")}
-                >
-                  Why WorkPulse
-                </Link>
-                <Link
-                  href="/#enterprise"
-                  onClick={() => {
-                    setCurrentHash("#enterprise");
-                    closeMenu();
-                  }}
-                  className={getMobileLinkClass("/#enterprise")}
-                >
-                  Enterprise
-                </Link>
-              </>
-            )}
+            <Suspense fallback={<MobileNavListStatic user={user} closeMenu={closeMenu} />}>
+              <MobileNavLinks user={user} closeMenu={closeMenu} />
+            </Suspense>
           </nav>
 
           <div className="mt-5 pt-4 border-t border-zinc-100 dark:border-zinc-800 flex flex-col gap-2.5">

@@ -7,8 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "postinstall": "node ./scripts/prisma-generate-safe.js",
     "db:push": "prisma db push",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:integration": "node ./scripts/run_integration_tests.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -34,6 +38,7 @@
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
+    "vitest": "^0.34.0",
     "typescript": "^5"
   }
 }

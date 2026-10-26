@@ -19,6 +19,10 @@ export interface ReviewProposalItem {
     name?: string | null;
     email?: string | null;
     image?: string | null;
+    title?: string | null;
+    skills?: string[];
+    hourlyRate?: number | null;
+    location?: string | null;
     createdAt?: string;
   };
 }
@@ -47,6 +51,8 @@ export function ClientProposalReview({
   const [proposals, setProposals] = useState<ReviewProposalItem[]>(initialProposals);
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [contractCreated, setContractCreated] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<string>(job.status);
   const [isPending, startTransition] = useTransition();
 
   const isHourly = job.type.toUpperCase() === "HOURLY";
@@ -68,8 +74,23 @@ export function ClientProposalReview({
       }
 
       setProposals((prev) =>
-        prev.map((p) => (p.id === proposalId ? { ...p, status: newStatus } : p))
+        prev.map((p) => {
+          if (newStatus === "ACCEPTED") {
+            if (p.id === proposalId) return { ...p, status: "ACCEPTED" };
+            if (p.status === "PENDING") return { ...p, status: "REJECTED" };
+            return p;
+          }
+          return p.id === proposalId ? { ...p, status: newStatus } : p;
+        })
       );
+
+      if (newStatus === "ACCEPTED") {
+        setJobStatus("CLOSED");
+        if (res.contractId) {
+          setContractCreated(res.contractId);
+        }
+      }
+
       setActiveActionId(null);
     });
   };
@@ -95,7 +116,14 @@ export function ClientProposalReview({
                 ? `Hourly ($${job.hourlyMin ?? 0} - $${job.hourlyMax ?? 0}/hr)`
                 : `Fixed-Price ($${job.budget?.toLocaleString() ?? 0})`}
             </span>{" "}
-            • Status: <span className="uppercase font-bold text-emerald-600">{job.status}</span>
+            • Status:{" "}
+            <span
+              className={`uppercase font-bold ${
+                jobStatus === "CLOSED" ? "text-zinc-500" : "text-emerald-600"
+              }`}
+            >
+              {jobStatus}
+            </span>
           </p>
         </div>
 
@@ -105,6 +133,24 @@ export function ClientProposalReview({
           </span>
         </div>
       </div>
+
+      {/* Contract Created Success Banner */}
+      {contractCreated && (
+        <div className="mb-6 rounded-2xl bg-emerald-50 p-4 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 text-sm font-medium text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>🎉</span>
+            <span>
+              Proposal accepted! A formal contract has been created and this job is now closed to new proposals.
+            </span>
+          </div>
+          <Link
+            href={`/contracts/${contractCreated}`}
+            className="inline-flex items-center rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500 transition shrink-0 ml-4"
+          >
+            View Contract →
+          </Link>
+        </div>
+      )}
 
       {/* Global Action Error Alert */}
       {actionError && (
@@ -157,22 +203,67 @@ export function ClientProposalReview({
               >
                 {/* Header row: Freelancer Info & Status */}
                 <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-zinc-100 dark:border-zinc-800">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 font-extrabold text-sm dark:bg-emerald-950 dark:text-emerald-400">
+                  <div className="flex items-start gap-3">
+                    <Link
+                      href={`/freelancers/${proposal.freelancer.id}`}
+                      target="_blank"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 font-extrabold text-sm dark:bg-emerald-950 dark:text-emerald-400 hover:scale-105 transition"
+                      title="View Freelancer Public Profile"
+                    >
                       {initials}
-                    </div>
+                    </Link>
                     <div>
-                      <h4 className="text-base font-bold text-zinc-900 dark:text-white">
-                        {freelancerDisplayName}
-                      </h4>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        Submitted on{" "}
-                        {new Date(proposal.createdAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/freelancers/${proposal.freelancer.id}`}
+                          target="_blank"
+                          className="text-base font-bold text-zinc-900 hover:text-emerald-600 dark:text-white dark:hover:text-emerald-400 hover:underline transition"
+                        >
+                          {freelancerDisplayName}
+                        </Link>
+                        <Link
+                          href={`/freelancers/${proposal.freelancer.id}`}
+                          target="_blank"
+                          className="rounded-lg bg-zinc-100 px-2 py-0.5 text-[10px] font-bold text-zinc-600 hover:bg-emerald-50 hover:text-emerald-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 transition"
+                        >
+                          View Profile ↗
+                        </Link>
+                      </div>
+                      {proposal.freelancer.title && (
+                        <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                          {proposal.freelancer.title}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                        {proposal.freelancer.location && (
+                          <span>📍 {proposal.freelancer.location} •</span>
+                        )}
+                        {proposal.freelancer.hourlyRate ? (
+                          <span>${proposal.freelancer.hourlyRate}/hr rate •</span>
+                        ) : null}
+                        <span>
+                          Applied{" "}
+                          {new Date(proposal.createdAt).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </span>
+                      </div>
+
+                      {/* Freelancer Profile Skills */}
+                      {proposal.freelancer.skills && proposal.freelancer.skills.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {proposal.freelancer.skills.slice(0, 6).map((skill) => (
+                            <span
+                              key={skill}
+                              className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                            >
+                              {skill}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 

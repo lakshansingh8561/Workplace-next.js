@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { loginUser } from "@/lib/actions/auth";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import { sanitizeRedirectPath } from "@/lib/validations/auth";
 
 export function LoginForm() {
   const router = useRouter();
@@ -12,7 +13,7 @@ export function LoginForm() {
 
   const isRegistered = searchParams.get("registered") === "true";
   const urlError = searchParams.get("error");
-  const redirectTo = searchParams.get("redirectTo") || "/jobs";
+  const redirectTo = sanitizeRedirectPath(searchParams.get("redirectTo"));
 
   const [isPending, startTransition] = useTransition();
   const [email, setEmail] = useState("");

@@ -48,9 +48,26 @@ export interface Job {
   clientRating?: number | null;
   clientSpent?: number | null;
   clientPaymentVerified?: boolean;
+  client?: {
+    id: string;
+    name?: string | null;
+    companyName?: string | null;
+    companyDescription?: string | null;
+    companyWebsite?: string | null;
+    companyIndustry?: string | null;
+    location?: string | null;
+  } | null;
   createdAt: string | Date;
   updatedAt?: string | Date;
   legacyId?: string;
+}
+
+export interface SavedJobItem {
+  id: string;
+  userId: string;
+  jobId: string;
+  createdAt: string | Date;
+  job: Job;
 }
 
 export interface JobPagination {
@@ -60,9 +77,16 @@ export interface JobPagination {
   totalPages: number;
 }
 
+export interface JobFilterFacets {
+  categories: { category: string; count: number }[];
+  skills: { skill: string; count: number }[];
+  budgetBounds: { min: number; max: number };
+}
+
 export interface JobsApiResponse {
   data: Job[];
   pagination: JobPagination;
+  facets?: JobFilterFacets;
   error?: string;
 }
 
@@ -253,5 +277,21 @@ export interface ConversationItem {
   };
 }
 
-
-
+export interface PublicFreelancerProfileData {
+  id: string;
+  name: string;
+  image?: string | null;
+  role: string;
+  title?: string | null;
+  bio?: string | null;
+  skills: string[];
+  hourlyRate?: number | null;
+  experience?: string | null;
+  location?: string | null;
+  languages: string[];
+  portfolioUrls: string[];
+  createdAt: string;
+  _count?: {
+    freelancerContracts: number;
+  };
+}
