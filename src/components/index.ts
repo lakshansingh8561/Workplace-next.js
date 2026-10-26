@@ -16,3 +16,24 @@ export { JobPagination } from "./jobs/JobPagination";
 export { JobSkeleton } from "./jobs/JobSkeleton";
 export { JobsExplorer } from "./jobs/JobsExplorer";
 export { JobDetailsView } from "./jobs/JobDetailsView";
+
+// Auth Components
+export { LoginForm } from "./auth/LoginForm";
+export { SignupForm } from "./auth/SignupForm";
+
+// Client Job Components
+export { PostJobForm } from "./jobs/PostJobForm";
+export { ApplyProposalModal } from "./jobs/ApplyProposalModal";
+
+// Dashboard Components
+export { ClientDashboardView } from "./dashboard/ClientDashboardView";
+export { FreelancerDashboardView } from "./dashboard/FreelancerDashboardView";
+export { ClientProposalReview } from "./dashboard/ClientProposalReview";
+
+// Contract Components
+export { ContractsListView } from "./contracts/ContractsListView";
+export { ContractDetailsView } from "./contracts/ContractDetailsView";
+
+
+
+

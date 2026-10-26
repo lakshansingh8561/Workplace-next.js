@@ -24,6 +24,7 @@ enum ExperienceLevel {
 enum JobStatus {
   DRAFT
   OPEN
+  PAUSED
   IN_PROGRESS
   COMPLETED
   CLOSED
@@ -44,6 +45,13 @@ model Job {
   status                JobStatus       @default(OPEN)
   proposalsCount        Int             @default(0)
 
+  // Ownership
+  clientId              String?         @db.ObjectId
+  client                User?           @relation(fields: [clientId], references: [id])
+
+  proposals             Proposal[]
+  contracts             Contract[]
+
   // Client Snapshot
   clientName            String?
   clientCountry         String?
@@ -54,6 +62,7 @@ model Job {
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @updatedAt
 
+  @@index([clientId])
   @@index([category])
   @@index([status])
   @@index([type])
@@ -61,3 +70,228 @@ model Job {
   @@index([createdAt])
   @@map("jobs")
 }
+
+enum Role {
+  CLIENT
+  FREELANCER
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum ContractStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  TERMINATED
+}
+
+enum MilestoneStatus {
+  PENDING
+  ACTIVE
+  SUBMITTED
+  APPROVED
+}
+
+model User {
+  id                  String     @id @default(auto()) @map("_id") @db.ObjectId
+  name                String?
+  email               String     @unique
+  emailVerified       DateTime?
+  image               String?
+  passwordHash        String?
+  role                Role       @default(CLIENT)
+  roleSelected        Boolean    @default(true)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  accounts            Account[]
+  sessions            Session[]
+  jobs                Job[]
+  proposals           Proposal[]
+  clientContracts     Contract[] @relation("ClientContracts")
+  freelancerContracts Contract[] @relation("FreelancerContracts")
+  clientConversations Conversation[] @relation("ClientConversations")
+  freelancerConversations Conversation[] @relation("FreelancerConversations")
+  sentMessages        Message[]  @relation("SentMessages")
+  notifications       Notification[] @relation("UserNotifications")
+
+  @@map("users")
+}
+
+model Proposal {
+  id                String         @id @default(auto()) @map("_id") @db.ObjectId
+  jobId             String         @db.ObjectId
+  job               Job            @relation(fields: [jobId], references: [id])
+  freelancerId      String         @db.ObjectId
+  freelancer        User           @relation(fields: [freelancerId], references: [id])
+  coverLetter       String
+  bidAmount         Float
+  estimatedDuration String?
+  status            ProposalStatus @default(PENDING)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  contract          Contract?
+
+  @@unique([jobId, freelancerId])
+  @@index([jobId])
+  @@index([freelancerId])
+  @@index([status])
+  @@map("proposals")
+}
+
+model Contract {
+  id                String              @id @default(auto()) @map("_id") @db.ObjectId
+  proposalId        String              @unique @db.ObjectId
+  proposal          Proposal            @relation(fields: [proposalId], references: [id])
+  jobId             String              @db.ObjectId
+  job               Job                 @relation(fields: [jobId], references: [id])
+  clientId          String              @db.ObjectId
+  client            User                @relation("ClientContracts", fields: [clientId], references: [id])
+  freelancerId      String              @db.ObjectId
+  freelancer        User                @relation("FreelancerContracts", fields: [freelancerId], references: [id])
+
+  title             String
+  type              PaymentType         @default(FIXED)
+  totalAmount       Float?
+  hourlyRate        Float?
+  terms             String?
+  status            ContractStatus      @default(ACTIVE)
+
+  startDate         DateTime            @default(now())
+  endDate           DateTime?
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  milestones        ContractMilestone[]
+  conversation      Conversation?
+
+  @@index([clientId])
+  @@index([freelancerId])
+  @@index([jobId])
+  @@index([status])
+  @@map("contracts")
+}
+
+model ContractMilestone {
+  id          String          @id @default(auto()) @map("_id") @db.ObjectId
+  contractId  String          @db.ObjectId
+  contract    Contract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  amount      Float
+  dueDate     DateTime?
+  status      MilestoneStatus @default(PENDING)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([contractId])
+  @@index([status])
+  @@map("contract_milestones")
+}
+
+model Conversation {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  contractId   String    @unique @db.ObjectId
+  contract     Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  clientId     String    @db.ObjectId
+  client       User      @relation("ClientConversations", fields: [clientId], references: [id])
+  freelancerId String    @db.ObjectId
+  freelancer   User      @relation("FreelancerConversations", fields: [freelancerId], references: [id])
+
+  messages      Message[]
+  lastMessageAt DateTime  @default(now())
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([clientId])
+  @@index([freelancerId])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  conversationId String       @db.ObjectId
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String       @db.ObjectId
+  sender         User         @relation("SentMessages", fields: [senderId], references: [id])
+  content        String
+  read           Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@map("messages")
+}
+
+enum NotificationType {
+  NEW_MESSAGE
+  MILESTONE_SUBMITTED
+  MILESTONE_APPROVED
+  CONTRACT_STATUS
+}
+
+model Notification {
+  id        String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String           @db.ObjectId
+  user      User             @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType @default(NEW_MESSAGE)
+  title     String
+  message   String
+  link      String?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model Account {
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @db.ObjectId
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.String
+  access_token      String? @db.String
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.String
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionToken String   @unique
+  userId       String   @db.ObjectId
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+

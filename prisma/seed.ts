@@ -7,17 +7,18 @@ export async function main() {
   console.log("Starting WorkPulse database seed...");
 
   for (const job of SEED_JOBS) {
-    // Exclude in-memory legacyId property so only valid schema fields are passed to MongoDB
+    // Exclude id from update payload and legacyId so only valid mutable fields are passed
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { legacyId, ...jobData } = job as typeof job & { legacyId?: string };
+    const { id, legacyId, ...dataWithoutId } = job as typeof job & { legacyId?: string };
 
     await prisma.job.upsert({
-      where: { id: jobData.id },
+      where: { id },
       update: {
-        ...jobData,
+        ...dataWithoutId,
       },
       create: {
-        ...jobData,
+        id,
+        ...dataWithoutId,
       },
     });
   }

@@ -5,6 +5,12 @@
 
 export type UserRole = "client" | "freelancer";
 
+export type Role = "CLIENT" | "FREELANCER";
+export const Role = {
+  CLIENT: "CLIENT",
+  FREELANCER: "FREELANCER",
+} as const;
+
 export interface User {
   id: string;
   name: string;
@@ -15,7 +21,7 @@ export interface User {
 }
 
 export type JobType = "hourly" | "fixed";
-export type JobStatus = "draft" | "open" | "in_progress" | "completed" | "closed";
+export type JobStatus = "draft" | "open" | "paused" | "in_progress" | "completed" | "closed";
 export type ExperienceLevel = "entry" | "intermediate" | "expert";
 
 export interface Job {
@@ -35,7 +41,7 @@ export interface Job {
   duration?: string | null;
   experienceLevel: "ENTRY" | "INTERMEDIATE" | "EXPERT" | ExperienceLevel;
   clientId?: string;
-  status: "OPEN" | "DRAFT" | "IN_PROGRESS" | "COMPLETED" | "CLOSED" | JobStatus;
+  status: "OPEN" | "PAUSED" | "DRAFT" | "IN_PROGRESS" | "COMPLETED" | "CLOSED" | JobStatus;
   proposalsCount: number;
   clientName?: string | null;
   clientCountry?: string | null;
@@ -107,3 +113,145 @@ export interface HowItWorksStep {
   description: string;
   forRole: "client" | "freelancer";
 }
+
+export type ProposalStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+
+export interface Proposal {
+  id: string;
+  jobId: string;
+  freelancerId: string;
+  coverLetter: string;
+  bidAmount: number;
+  estimatedDuration?: string | null;
+  status: ProposalStatus;
+  createdAt: string | Date;
+  updatedAt?: string | Date;
+  freelancer?: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+  };
+  job?: {
+    id: string;
+    title: string;
+    type: string;
+    budget?: number | null;
+    hourlyMin?: number | null;
+    hourlyMax?: number | null;
+    clientId?: string | null;
+  };
+}
+
+export type ContractStatus = "ACTIVE" | "PAUSED" | "COMPLETED" | "TERMINATED";
+export type MilestoneStatus = "PENDING" | "ACTIVE" | "SUBMITTED" | "APPROVED";
+
+export interface ContractMilestone {
+  id: string;
+  contractId: string;
+  title: string;
+  description?: string | null;
+  amount: number;
+  dueDate?: string | null;
+  status: MilestoneStatus;
+  createdAt: string | Date;
+  updatedAt?: string | Date;
+}
+
+export interface Contract {
+  id: string;
+  proposalId: string;
+  jobId: string;
+  clientId: string;
+  freelancerId: string;
+  title: string;
+  type: "HOURLY" | "FIXED" | JobType;
+  totalAmount?: number | null;
+  hourlyRate?: number | null;
+  terms?: string | null;
+  status: ContractStatus;
+  startDate: string | Date;
+  endDate?: string | Date | null;
+  createdAt: string | Date;
+  updatedAt?: string | Date;
+  milestones?: ContractMilestone[];
+  job?: {
+    id: string;
+    title: string;
+    category: string;
+    type: string;
+  };
+  client?: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+  };
+  freelancer?: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+  };
+}
+
+export type NotificationType =
+  | "NEW_MESSAGE"
+  | "MILESTONE_SUBMITTED"
+  | "MILESTONE_APPROVED"
+  | "CONTRACT_STATUS";
+
+export interface NotificationItem {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  link?: string | null;
+  read: boolean;
+  createdAt: string | Date;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  read: boolean;
+  createdAt: string | Date;
+  sender?: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+  };
+}
+
+export interface ConversationItem {
+  id: string;
+  contractId: string;
+  clientId: string;
+  freelancerId: string;
+  lastMessageAt: string | Date;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  unreadCount?: number;
+  lastMessage?: string | null;
+  contract: {
+    id: string;
+    title: string;
+    status: string;
+  };
+  client: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+  };
+  freelancer: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+  };
+}
+
+
+

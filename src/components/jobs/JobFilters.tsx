@@ -30,7 +30,7 @@ export function JobFilters({
     selectedSort !== "newest";
 
   return (
-    <aside className="rounded-2xl border border-zinc-200/90 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90 space-y-6">
+    <aside className="rounded-2xl border border-zinc-200/90 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90 space-y-6 max-h-[calc(100vh-6rem)] overflow-y-auto overscroll-contain">
       <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
         <h3 className="font-bold text-sm tracking-tight text-zinc-900 dark:text-white">
           Filter Jobs

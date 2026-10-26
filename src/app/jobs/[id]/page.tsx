@@ -18,9 +18,24 @@ export async function generateMetadata({
   };
 }
 
+import { connection } from "next/server";
+import { getCurrentUser } from "@/lib/session";
+import { getFreelancerProposalForJob } from "@/lib/actions/proposal";
+
 async function JobContent({ params }: JobPageProps) {
+  await connection();
   const { id } = await params;
-  return <JobDetailsView jobId={id} />;
+  const user = await getCurrentUser();
+  const initialProposal =
+    user?.role === "FREELANCER" ? await getFreelancerProposalForJob(id) : null;
+
+  return (
+    <JobDetailsView
+      jobId={id}
+      initialUser={user}
+      initialProposal={initialProposal}
+    />
+  );
 }
 
 export default function JobDetailPage({ params }: JobPageProps) {

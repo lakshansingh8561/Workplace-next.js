@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getJobById } from "@/lib/jobs";
+import { getJobById, isValidObjectId } from "@/lib/jobs";
 
 interface RouteContext {
   params: Promise<{
@@ -10,6 +10,7 @@ interface RouteContext {
 /**
  * GET /api/jobs/[id]
  * Retrieves a single job by its ID.
+ * Returns 400 for malformed ObjectIds.
  * Returns 404 if the job cannot be found.
  */
 export async function GET(_request: NextRequest, context: RouteContext) {
@@ -18,6 +19,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
     if (!id || typeof id !== "string") {
       return NextResponse.json({ error: "Job ID is required" }, { status: 400 });
+    }
+
+    if (!isValidObjectId(id)) {
+      return NextResponse.json(
+        { error: `Invalid job ID '${id}'. Expected a 24-character hexadecimal ObjectId.` },
+        { status: 400 }
+      );
     }
 
     const { data: job, source } = await getJobById(id);

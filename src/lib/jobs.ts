@@ -26,9 +26,8 @@ export type JobQueryParams = z.infer<typeof JobQuerySchema>;
 
 /**
  * Retrieves a paginated and filtered list of jobs.
- * Attempts querying PostgreSQL via Prisma first.
- * If the database is unreachable (e.g. before local PostgreSQL is started),
- * gracefully falls back to the development seed dataset with identical query logic.
+ * Executes live queries against MongoDB Atlas via Prisma.
+ * If USE_MOCK_DATA="true" is explicitly set in development, falls back to SEED_JOBS.
  */
 export async function getJobs(rawParams: unknown): Promise<{
   data: Job[];
@@ -36,6 +35,10 @@ export async function getJobs(rawParams: unknown): Promise<{
   source: "database" | "seed";
 }> {
   const validated = JobQuerySchema.parse(rawParams);
+
+  if (process.env.USE_MOCK_DATA === "true") {
+    return getFallbackJobs(validated);
+  }
 
   try {
     const where: Prisma.JobWhereInput = {
@@ -60,6 +63,7 @@ export async function getJobs(rawParams: unknown): Promise<{
         { title: { contains: q, mode: "insensitive" } },
         { description: { contains: q, mode: "insensitive" } },
         { category: { contains: q, mode: "insensitive" } },
+        { skills: { has: q } },
       ];
     }
 
@@ -88,27 +92,23 @@ export async function getJobs(rawParams: unknown): Promise<{
       }),
     ]);
 
-    if (total > 0 || jobs.length > 0) {
-      return {
-        data: jobs as unknown as Job[],
-        pagination: {
-          total,
-          page: validated.page,
-          limit: validated.limit,
-          totalPages: Math.ceil(total / validated.limit) || 1,
-        },
-        source: "database",
-      };
-    }
+    return {
+      data: jobs as unknown as Job[],
+      pagination: {
+        total,
+        page: validated.page,
+        limit: validated.limit,
+        totalPages: Math.ceil(total / validated.limit) || 1,
+      },
+      source: "database",
+    };
   } catch (error) {
-    console.warn(
-      "[WorkPulse Data Layer] Database query failed or PostgreSQL is unreachable. Serving seed dataset fallback.",
+    console.error(
+      "[WorkPulse Data Layer] Database query failed:",
       error instanceof Error ? error.message : error
     );
+    throw error;
   }
-
-  // Graceful fallback to development seed data with identical filtering & pagination
-  return getFallbackJobs(validated);
 }
 
 /**
@@ -119,39 +119,43 @@ export function isValidObjectId(id: string): boolean {
 }
 
 /**
- * Retrieves a single job by unique identifier.
+ * Retrieves a single job by unique identifier from MongoDB Atlas.
  * Validates MongoDB ObjectId format before database query to prevent BSON errors.
- * Supports legacy slug IDs through the seed fallback mechanism.
  */
 export async function getJobById(id: string): Promise<{
   data: Job | null;
   source: "database" | "seed";
 }> {
-  if (isValidObjectId(id)) {
-    try {
-      const job = await prisma.job.findUnique({
-        where: { id },
-      });
-
-      if (job) {
-        return { data: job as unknown as Job, source: "database" };
-      }
-    } catch (error) {
-      console.warn(
-        `[WorkPulse Data Layer] Database query failed for job ID: ${id}. Checking seed data.`,
-        error instanceof Error ? error.message : error
-      );
-    }
+  if (process.env.USE_MOCK_DATA === "true") {
+    const fallback = SEED_JOBS.find(
+      (j) => j.id === id || (j as { legacyId?: string }).legacyId === id
+    );
+    return {
+      data: fallback ? (fallback as unknown as Job) : null,
+      source: "seed",
+    };
   }
 
-  const fallback = SEED_JOBS.find(
-    (j) => j.id === id || (j as { legacyId?: string }).legacyId === id
-  );
+  if (!isValidObjectId(id)) {
+    return { data: null, source: "database" };
+  }
 
-  return {
-    data: fallback ? (fallback as unknown as Job) : null,
-    source: fallback ? "seed" : "database",
-  };
+  try {
+    const job = await prisma.job.findUnique({
+      where: { id },
+    });
+
+    return {
+      data: job ? (job as unknown as Job) : null,
+      source: "database",
+    };
+  } catch (error) {
+    console.error(
+      `[WorkPulse Data Layer] Database query failed for job ID: ${id}:`,
+      error instanceof Error ? error.message : error
+    );
+    throw error;
+  }
 }
 
 /**

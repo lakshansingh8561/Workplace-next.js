@@ -164,9 +164,9 @@ export function JobsExplorer() {
       </div>
 
       {/* Main Grid: Sidebar Filters + Job Listings */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        {/* Sidebar Filters */}
-        <div className="lg:col-span-1">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
+        {/* Sidebar Filters (Sticky on desktop) */}
+        <div className="lg:col-span-1 lg:sticky lg:top-20 self-start">
           <JobFilters
             selectedCategory={categoryParam}
             selectedType={typeParam}
