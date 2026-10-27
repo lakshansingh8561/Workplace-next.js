@@ -50,7 +50,7 @@ model Job {
   client                User?           @relation(fields: [clientId], references: [id])
 
   proposals             Proposal[]
-  contracts             Contract[]
+  contract              Contract?
   savedBy               SavedJob[]
 
   // Client Snapshot
@@ -140,6 +140,9 @@ model User {
   notifications       Notification[] @relation("UserNotifications")
   reviewsGiven        Review[]       @relation("ReviewsGiven")
   reviewsReceived     Review[]       @relation("ReviewsReceived")
+  timeEntries         TimeEntry[]    @relation("FreelancerTimeEntries")
+  paymentsMade        Payment[]      @relation("PaymentsMade")
+  paymentsReceived    Payment[]      @relation("PaymentsReceived")
 
   @@map("users")
 }
@@ -171,7 +174,7 @@ model Contract {
   id                String              @id @default(auto()) @map("_id") @db.ObjectId
   proposalId        String              @unique @db.ObjectId
   proposal          Proposal            @relation(fields: [proposalId], references: [id])
-  jobId             String              @db.ObjectId
+  jobId             String              @unique @db.ObjectId
   job               Job                 @relation(fields: [jobId], references: [id])
   clientId          String              @db.ObjectId
   client            User                @relation("ClientContracts", fields: [clientId], references: [id])
@@ -194,10 +197,12 @@ model Contract {
   milestones        ContractMilestone[]
   conversation      Conversation?
   reviews           Review[]
+  timeEntries       TimeEntry[]
+  timeScreenshots   TimeScreenshot[]
+  payments          Payment[]
 
   @@index([clientId])
   @@index([freelancerId])
-  @@index([jobId])
   @@index([status])
   @@map("contracts")
 }
@@ -211,6 +216,9 @@ model ContractMilestone {
   amount      Float
   dueDate     DateTime?
   status      MilestoneStatus @default(PENDING)
+  isPaid      Boolean         @default(false)
+  paidAt      DateTime?
+  payments    Payment[]
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
@@ -352,5 +360,128 @@ model Review {
   @@index([reviewerId])
   @@index([contractId])
   @@map("reviews")
+}
+
+enum TimeTrackingStatus {
+  RECORDING
+  PAUSED
+  STOPPED
+}
+
+enum TimesheetReviewStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  DISPUTED
+}
+
+model TimeEntry {
+  id                 String                @id @default(auto()) @map("_id") @db.ObjectId
+  contractId         String                @db.ObjectId
+  contract           Contract              @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  freelancerId       String                @db.ObjectId
+  freelancer         User                  @relation("FreelancerTimeEntries", fields: [freelancerId], references: [id], onDelete: Cascade)
+
+  description        String?
+  status             TimeTrackingStatus    @default(RECORDING)
+
+  startTime          DateTime              @default(now())
+  endTime            DateTime?
+  pausedAt           DateTime?
+
+  durationSeconds    Int                   @default(0)
+  totalPausedSeconds Int                   @default(0)
+
+  hourlyRate         Float
+  billableAmount     Float?
+
+  reviewStatus       TimesheetReviewStatus @default(DRAFT)
+  submittedAt        DateTime?
+  reviewedAt         DateTime?
+  reviewedById       String?               @db.ObjectId
+  disputeReason      String?
+  isPaid             Boolean               @default(false)
+  paidAt             DateTime?
+
+  screenshots        TimeScreenshot[]
+
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([contractId, startTime])
+  @@index([contractId, reviewStatus])
+  @@index([freelancerId, status])
+  @@index([contractId, status])
+  @@map("time_entries")
+}
+
+model TimeScreenshot {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  timeEntryId   String    @db.ObjectId
+  timeEntry     TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  contractId    String    @db.ObjectId
+  contract      Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  timestamp     DateTime  @default(now())
+  imageUrl      String?
+
+  activityScore Float     @default(100.0)
+  keystrokes    Int       @default(0)
+  mouseEvents   Int       @default(0)
+  memo          String?
+
+  createdAt     DateTime  @default(now())
+
+  @@index([timeEntryId, timestamp])
+  @@index([contractId, timestamp])
+  @@map("time_screenshots")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum PaymentItemType {
+  MILESTONE
+  HOURLY_TIMESHEET
+}
+
+model Payment {
+  id                String             @id @default(auto()) @map("_id") @db.ObjectId
+  contractId        String             @db.ObjectId
+  contract          Contract           @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  payerId           String             @db.ObjectId
+  payer             User               @relation("PaymentsMade", fields: [payerId], references: [id])
+  recipientId       String             @db.ObjectId
+  recipient         User               @relation("PaymentsReceived", fields: [recipientId], references: [id])
+
+  itemType          PaymentItemType
+  milestoneId       String?            @db.ObjectId
+  milestone         ContractMilestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  timeEntryIds      String[]
+
+  amount            Float
+  currency          String             @default("INR")
+  amountSubunits    Int
+
+  razorpayOrderId   String             @unique
+  razorpayPaymentId String?            @unique
+  razorpaySignature String?
+
+  status            PaymentStatus      @default(PENDING)
+  failureReason     String?
+  paidAt            DateTime?
+
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([contractId])
+  @@index([payerId])
+  @@index([recipientId])
+  @@index([milestoneId])
+  @@index([status])
+  @@map("payments")
 }
 

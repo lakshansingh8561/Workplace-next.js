@@ -592,18 +592,75 @@ export async function updateProposalStatusAction(
       };
     }
 
-    // 3. Handle duplicate constraint errors (e.g. P2002 on unique proposal or contract)
+    // 3. Handle recognized duplicate-key errors for Contract.jobId or Contract.proposalId
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
+      const meta = error.meta as
+        | { target?: string | string[]; modelName?: string }
+        | undefined;
+      const targetStr = Array.isArray(meta?.target)
+        ? meta.target.join(" ")
+        : typeof meta?.target === "string"
+        ? meta.target
+        : "";
+      const modelName = meta?.modelName || "";
+
+      const isContractJobConflict =
+        targetStr.includes("jobId") ||
+        (modelName === "Contract" && (targetStr.includes("jobId") || !targetStr)) ||
+        /jobId/i.test(targetStr) ||
+        /contracts?.*jobId|jobId.*contracts?/i.test(errorMsg) ||
+        /Unique constraint failed.*(?:jobId|contracts_jobId)/i.test(errorMsg);
+
+      const isContractProposalConflict =
+        targetStr.includes("proposalId") ||
+        (modelName === "Contract" && targetStr.includes("proposalId")) ||
+        /proposalId/i.test(targetStr) ||
+        /contracts?.*proposalId/i.test(errorMsg);
+
+      if (isContractJobConflict || isContractProposalConflict) {
+        return {
+          success: false,
+          error: "A contract has already been awarded and formed for this job.",
+        };
+      }
+
+      // Unrelated duplicate errors on other models are not misclassified as contract errors
+      console.error(
+        "[WorkPulse Status Update Unrelated Duplicate Error]:",
+        error.message
+      );
       return {
         success: false,
-        error: "A contract has already been awarded and formed for this job.",
+        error: "A conflict occurred with an existing record. Please try again.",
       };
     }
 
-    // 4. Fallback for ordinary unrelated database errors (do not leak raw internals or misclassify as concurrency conflict)
+    // 4. Handle raw MongoDB E11000 duplicate key errors if propagated
+    const isMongoDuplicateKey =
+      /E11000\s+duplicate\s+key/i.test(errorMsg) ||
+      (typeof (error as Record<string, unknown>)?.code === "number" &&
+        (error as Record<string, unknown>)?.code === 11000);
+
+    if (isMongoDuplicateKey) {
+      if (
+        /contracts?.*jobId|jobId.*contracts?/i.test(errorMsg) ||
+        /jobId/i.test(errorMsg)
+      ) {
+        return {
+          success: false,
+          error: "A contract has already been awarded and formed for this job.",
+        };
+      }
+      return {
+        success: false,
+        error: "A conflict occurred with an existing record. Please try again.",
+      };
+    }
+
+    // 5. Fallback for ordinary unrelated database errors (do not leak raw internals or misclassify as concurrency conflict)
     console.error(
       "[WorkPulse Status Update Error]:",
       error instanceof Error ? error.message : "Database error"

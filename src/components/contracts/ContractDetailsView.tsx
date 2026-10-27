@@ -12,6 +12,11 @@ import {
 import { ContractStatus, MilestoneStatus, PaymentType } from "@prisma/client";
 import { ContractReviewSection } from "@/components/contracts/ContractReviewSection";
 import type { ContractReviewData } from "@/lib/actions/review";
+import { FreelancerTimeTrackerWidget } from "@/components/contracts/FreelancerTimeTrackerWidget";
+import { ClientWorkDiaryView } from "@/components/contracts/ClientWorkDiaryView";
+import { RazorpayPaymentButton } from "@/components/payments/RazorpayCheckoutButton";
+import { PaymentHistorySection } from "@/components/payments/PaymentHistorySection";
+import { formatDate } from "@/lib/utils";
 
 export interface DetailMilestone {
   id: string;
@@ -20,6 +25,8 @@ export interface DetailMilestone {
   amount: number;
   dueDate?: string | null;
   status: MilestoneStatus;
+  isPaid?: boolean;
+  paidAt?: string | null;
   createdAt: string;
 }
 
@@ -74,6 +81,8 @@ export function ContractDetailsView({
   const [actionError, setActionError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
+  const [diaryRefreshKey, setDiaryRefreshKey] = useState(0);
+  const [paymentRefreshTrigger, setPaymentRefreshTrigger] = useState(0);
   const [isPending, startTransition] = useTransition();
 
   const isClient = currentUserRole === "CLIENT" && contract.clientId === currentUserId;
@@ -256,8 +265,8 @@ export function ContractDetailsView({
                 Formal Contract Agreement
               </span>
               <span className="text-zinc-300 dark:text-zinc-700">•</span>
-              <span className="text-zinc-500">
-                Effective {new Date(contract.startDate).toLocaleDateString()}
+              <span className="text-zinc-500" suppressHydrationWarning>
+                Effective {formatDate(contract.startDate)}
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-950 dark:text-white">
@@ -398,7 +407,29 @@ export function ContractDetailsView({
         )}
       </div>
 
-      {/* Milestones Section */}
+      {/* Hourly Contract: Freelancer Live Time Tracker Widget */}
+      {isHourly && isFreelancer && contract.status === "ACTIVE" && (
+        <FreelancerTimeTrackerWidget
+          contractId={contract.id}
+          contractTitle={contract.title}
+          hourlyRate={contract.hourlyRate ?? 0}
+          onSessionUpdated={() => setDiaryRefreshKey((k) => k + 1)}
+        />
+      )}
+
+      {/* Hourly Contract: Client & Freelancer Work Diary & Billing Records */}
+      {isHourly && (
+        <ClientWorkDiaryView
+          contractId={contract.id}
+          contractTitle={contract.title}
+          hourlyRate={contract.hourlyRate ?? 0}
+          isClient={isClient}
+          refreshTrigger={diaryRefreshKey}
+        />
+      )}
+
+      {/* Milestones Section (For Fixed Contracts or Supplemental Hourly Checkpoints) */}
+      {(!isHourly || contract.milestones.length > 0 || (isClient && contract.status === "ACTIVE")) && (
       <div className="mt-8 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -580,8 +611,8 @@ export function ContractDetailsView({
                         {milestone.dueDate && (
                           <>
                             <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                            <span className="text-zinc-500">
-                              Due {new Date(milestone.dueDate).toLocaleDateString()}
+                            <span className="text-zinc-500" suppressHydrationWarning>
+                              Due {formatDate(milestone.dueDate)}
                             </span>
                           </>
                         )}
@@ -603,14 +634,18 @@ export function ContractDetailsView({
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${
                           milestone.status === "APPROVED"
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800"
+                            ? milestone.isPaid
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
+                              : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800"
                             : milestone.status === "SUBMITTED"
                             ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400 border border-amber-300 dark:border-amber-800"
                             : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-400 border border-blue-300 dark:border-blue-800"
                         }`}
                       >
                         {milestone.status === "APPROVED"
-                          ? "✓ Approved"
+                          ? milestone.isPaid
+                            ? "✓ Paid via Razorpay"
+                            : "✓ Approved"
                           : milestone.status === "SUBMITTED"
                           ? "⏳ In Review"
                           : "● Active"}
@@ -639,6 +674,33 @@ export function ContractDetailsView({
                           {isActionProcessing ? "Approving..." : "Approve Milestone"}
                         </button>
                       )}
+
+                      {/* Client Action: Pay Approved Milestone with Razorpay */}
+                      {milestone.status === "APPROVED" && !milestone.isPaid && isClient && (
+                        <RazorpayPaymentButton
+                          contractId={contract.id}
+                          itemType="MILESTONE"
+                          milestoneId={milestone.id}
+                          amountLabel={`$${milestone.amount.toLocaleString()}`}
+                          buttonLabel={`Pay Milestone ($${milestone.amount.toLocaleString()})`}
+                          onPaymentSuccess={() => {
+                            setContract((prev) => ({
+                              ...prev,
+                              milestones: prev.milestones.map((m) =>
+                                m.id === milestone.id ? { ...m, isPaid: true } : m
+                              ),
+                            }));
+                            setPaymentRefreshTrigger((prev) => prev + 1);
+                          }}
+                        />
+                      )}
+
+                      {/* Freelancer Notice: Approved but unpaid */}
+                      {milestone.status === "APPROVED" && !milestone.isPaid && isFreelancer && (
+                        <span className="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-3 py-1 rounded-full border border-amber-200 dark:border-amber-900/50">
+                          Awaiting Client Payment
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -647,6 +709,13 @@ export function ContractDetailsView({
           </div>
         )}
       </div>
+      )}
+
+      {/* Auditable Payment & Settlement History Section */}
+      <PaymentHistorySection
+        contractId={contract.id}
+        refreshTrigger={paymentRefreshTrigger}
+      />
 
       {/* Contract Ratings & Reviews Section */}
       {reviewData && (

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ContractStatus, PaymentType } from "@prisma/client";
+import { formatDate } from "@/lib/utils";
 
 export interface ContractListItem {
   id: string;
@@ -195,8 +196,8 @@ export function ContractsListView({
                         {contract.counterpartyRole}: {contract.counterpartyName}
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                      <span className="text-zinc-500">
-                        Started {new Date(contract.startDate).toLocaleDateString()}
+                      <span className="text-zinc-500" suppressHydrationWarning>
+                        Started {formatDate(contract.startDate)}
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">•</span>
                       <span className="font-bold text-zinc-800 dark:text-zinc-200">

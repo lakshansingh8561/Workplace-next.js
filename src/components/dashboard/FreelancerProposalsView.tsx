@@ -7,6 +7,7 @@ import {
   FreelancerProposalItem,
   FreelancerProposalsCounts,
 } from "@/lib/actions/proposal";
+import { formatDate } from "@/lib/utils";
 
 interface FreelancerProposalsViewProps {
   proposals: FreelancerProposalItem[];
@@ -216,8 +217,8 @@ export function FreelancerProposalsView({
                         {proposal.job.category}
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                      <span className="text-zinc-500">
-                        Submitted {new Date(proposal.createdAt).toLocaleDateString()}
+                      <span className="text-zinc-500" suppressHydrationWarning>
+                        Submitted {formatDate(proposal.createdAt)}
                       </span>
                       {proposal.job.clientCountry && (
                         <>

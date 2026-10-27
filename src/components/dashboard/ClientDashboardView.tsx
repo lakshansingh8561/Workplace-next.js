@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { updateJobStatusAction } from "@/lib/actions/job";
 import { JobStatus } from "@prisma/client";
+import { formatDate } from "@/lib/utils";
 
 export interface ClientDashboardJob {
   id: string;
@@ -247,8 +248,8 @@ export function ClientDashboardView({
                         {job.category}
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                      <span className="text-zinc-500">
-                        Posted {new Date(job.createdAt).toLocaleDateString()}
+                      <span className="text-zinc-500" suppressHydrationWarning>
+                        Posted {formatDate(job.createdAt)}
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">•</span>
                       <span className="font-bold text-zinc-800 dark:text-zinc-200">

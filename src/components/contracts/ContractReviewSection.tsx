@@ -138,11 +138,12 @@ export function ContractReviewSection({
             <p className="text-sm font-bold text-zinc-900 dark:text-white">
               {isSelf ? "Your Review" : review.reviewer.name || `${counterpartRole}`}
             </p>
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-[11px] text-zinc-500" suppressHydrationWarning>
               {new Date(review.createdAt).toLocaleDateString("en-US", {
                 month: "short",
                 day: "numeric",
                 year: "numeric",
+                timeZone: "UTC",
               })}
               {review.updatedAt !== review.createdAt && " (edited)"}
             </p>

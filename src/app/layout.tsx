@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Script from "next/script";
 import { Navbar, Footer } from "@/components";
 import { NavbarServer } from "@/components/layout/NavbarServer";
 
@@ -37,6 +38,11 @@ export default function RootLayout({
         </Suspense>
         <main className="flex-1 flex flex-col">{children}</main>
         <Footer />
+        <Script
+          id="razorpay-checkout-sdk"
+          src="https://checkout.razorpay.com/v1/checkout.js"
+          strategy="lazyOnload"
+        />
       </body>
     </html>
   );

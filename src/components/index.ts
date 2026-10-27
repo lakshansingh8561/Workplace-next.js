@@ -33,7 +33,5 @@ export { ClientProposalReview } from "./dashboard/ClientProposalReview";
 // Contract Components
 export { ContractsListView } from "./contracts/ContractsListView";
 export { ContractDetailsView } from "./contracts/ContractDetailsView";
-
-
-
-
+export { FreelancerTimeTrackerWidget } from "./contracts/FreelancerTimeTrackerWidget";
+export { ClientWorkDiaryView } from "./contracts/ClientWorkDiaryView";

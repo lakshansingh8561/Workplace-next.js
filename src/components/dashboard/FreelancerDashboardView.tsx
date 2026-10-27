@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProposalStatus } from "@/types";
+import { formatDate } from "@/lib/utils";
 
 export interface FreelancerDashboardProposal {
   id: string;
@@ -220,8 +221,8 @@ export function FreelancerDashboardView({
                         {proposal.job.category}
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                      <span className="text-zinc-500">
-                        Submitted {new Date(proposal.createdAt).toLocaleDateString()}
+                      <span className="text-zinc-500" suppressHydrationWarning>
+                        Submitted {formatDate(proposal.createdAt)}
                       </span>
                       {proposal.job.clientCountry && (
                         <>

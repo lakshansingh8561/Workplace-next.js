@@ -117,6 +117,26 @@ async function ContractDetailContent({ params }: ContractDetailPageProps) {
     );
   }
 
+  // Resiliently resolve paid milestone status via Payment records or milestone fields
+  const paidMilestoneMap = new Map<string, Date>();
+  try {
+    const successfulPayments = await prisma.payment.findMany({
+      where: {
+        contractId: rawContract.id,
+        itemType: "MILESTONE",
+        status: "SUCCESS",
+      },
+      select: { milestoneId: true, paidAt: true },
+    });
+    for (const p of successfulPayments) {
+      if (p.milestoneId && p.paidAt) {
+        paidMilestoneMap.set(p.milestoneId, p.paidAt);
+      }
+    }
+  } catch {
+    // If payments collection not yet initialized, falls back cleanly
+  }
+
   const contract: ContractDetail = {
     id: rawContract.id,
     jobId: rawContract.jobId,
@@ -132,15 +152,27 @@ async function ContractDetailContent({ params }: ContractDetailPageProps) {
     freelancerId: rawContract.freelancerId,
     client: rawContract.client,
     freelancer: rawContract.freelancer,
-    milestones: rawContract.milestones.map((m) => ({
-      id: m.id,
-      title: m.title,
-      description: m.description,
-      amount: m.amount,
-      dueDate: m.dueDate?.toISOString() || null,
-      status: m.status,
-      createdAt: m.createdAt.toISOString(),
-    })),
+    milestones: rawContract.milestones.map((m) => {
+      const isPaidFromPayment = paidMilestoneMap.has(m.id);
+      const isPaidFromMilestone = Boolean((m as { isPaid?: boolean }).isPaid);
+      const isPaid = isPaidFromPayment || isPaidFromMilestone;
+      const paidDate =
+        paidMilestoneMap.get(m.id) ||
+        (m as { paidAt?: Date | null }).paidAt ||
+        null;
+
+      return {
+        id: m.id,
+        title: m.title,
+        description: m.description,
+        amount: m.amount,
+        dueDate: m.dueDate?.toISOString() || null,
+        status: m.status,
+        isPaid,
+        paidAt: paidDate ? paidDate.toISOString() : null,
+        createdAt: m.createdAt.toISOString(),
+      };
+    }),
   };
 
   const reviewData = await getContractReviewsData(rawContract.id, user.id);
