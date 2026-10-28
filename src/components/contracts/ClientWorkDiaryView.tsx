@@ -681,8 +681,8 @@ function SessionRow({
         </div>
       </div>
 
-      {/* Snapshots Toggle */}
-      {entry.screenshots && entry.screenshots.length > 0 && (
+      {/* Snapshots Toggle or Explanatory Status */}
+      {entry.screenshots && entry.screenshots.length > 0 ? (
         <div className="pt-1">
           <button
             type="button"
@@ -732,6 +732,13 @@ function SessionRow({
             </div>
           )}
         </div>
+      ) : (
+        entry.status === TimeTrackingStatus.STOPPED && (
+          <div className="pt-1 flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+            <span>📷</span>
+            <span>No interval screenshots recorded for this session (Screen sharing was inactive or session under 10 minutes)</span>
+          </div>
+        )
       )}
     </div>
   );

@@ -47,6 +47,21 @@ export function FreelancerTimeTrackerWidget({
     descriptionRef.current = description;
   }, [description]);
 
+  const onSessionUpdatedRef = useRef(onSessionUpdated);
+  useEffect(() => {
+    onSessionUpdatedRef.current = onSessionUpdated;
+  }, [onSessionUpdated]);
+
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const performSnapshotCaptureRef = useRef<((isManual?: boolean) => Promise<void>) | null>(null);
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
@@ -57,6 +72,7 @@ export function FreelancerTimeTrackerWidget({
   const [screenCaptureError, setScreenCaptureError] = useState<string | null>(null);
   const [isStorageConfigured, setIsStorageConfigured] = useState<boolean>(false);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
   const isScreenCaptureSupported =
     typeof navigator !== "undefined" && !!navigator?.mediaDevices?.getDisplayMedia;
 
@@ -147,6 +163,14 @@ export function FreelancerTimeTrackerWidget({
       });
       screenStreamRef.current = null;
     }
+    if (videoElementRef.current) {
+      try {
+        videoElementRef.current.pause();
+      } catch {
+        // ignore
+      }
+      videoElementRef.current.srcObject = null;
+    }
     setScreenShareActive(false);
   }, []);
 
@@ -176,18 +200,11 @@ export function FreelancerTimeTrackerWidget({
     };
   }, [stopScreenStream]);
 
-  // 3. Screen Sharing Consent Initiation
-  const handleToggleScreenShare = async () => {
-    setScreenCaptureError(null);
-
-    if (screenShareActive) {
-      stopScreenStream();
-      return;
-    }
-
+  // Request screen sharing stream (called proactively on start/resume or manually via toggle)
+  const requestScreenShareStream = useCallback(async (): Promise<boolean> => {
     if (!isScreenCaptureSupported) {
       setScreenCaptureError("Screen capture is not supported by your browser.");
-      return;
+      return false;
     }
 
     try {
@@ -200,21 +217,42 @@ export function FreelancerTimeTrackerWidget({
       if (!videoTrack || videoTrack.readyState !== "live") {
         setScreenCaptureError("No active video track available from screen sharing.");
         stopScreenStream();
-        return;
+        return false;
       }
 
       screenStreamRef.current = stream;
+      if (videoElementRef.current) {
+        videoElementRef.current.srcObject = stream;
+        videoElementRef.current.play().catch((e) => console.warn("Video play notice:", e));
+      }
       setScreenShareActive(true);
+      setScreenCaptureError(null);
 
       // Listen for user stopping sharing via native browser banner
       videoTrack.onended = () => {
         stopScreenStream();
       };
+      return true;
     } catch (err) {
       console.warn("Screen sharing permission declined or cancelled:", err);
-      setScreenCaptureError("Screen sharing permission was cancelled or not granted.");
+      setScreenCaptureError(
+        "Screen sharing permission was cancelled or not granted. Automatic screenshots will be paused until granted."
+      );
       setScreenShareActive(false);
+      return false;
     }
+  }, [isScreenCaptureSupported, stopScreenStream]);
+
+  // 3. Screen Sharing Consent Initiation
+  const handleToggleScreenShare = async () => {
+    setScreenCaptureError(null);
+
+    if (screenShareActive) {
+      stopScreenStream();
+      return;
+    }
+
+    await requestScreenShareStream();
   };
 
   // 4. Capture Canvas Frame & Record Snapshot (Called automatically every 10 min or manually)
@@ -223,55 +261,113 @@ export function FreelancerTimeTrackerWidget({
       if (!activeEntryId || status !== TimeTrackingStatus.RECORDING) return;
       if (isCapturingRef.current) return;
 
+      setErrorMessage(null);
+
+      // Verify active screen sharing stream
+      const isStreamActive = Boolean(
+        screenStreamRef.current &&
+        screenStreamRef.current.active &&
+        screenStreamRef.current.getVideoTracks().some((t) => t.readyState === "live")
+      );
+
+      // For automatic 10-minute captures, screen sharing permission is strictly required.
+      // Do not create fake snapshot records without user consent.
+      if (!isStreamActive) {
+        if (screenStreamRef.current) {
+          stopScreenStream();
+        }
+        if (!isManual) {
+          setScreenCaptureError(
+            "Automatic screenshot skipped: Screen sharing permission is required. Grant permission to enable automatic work screenshots."
+          );
+          nextCaptureTimeRef.current = Date.now() + SCREENSHOT_CAPTURE_INTERVAL_MS;
+          setSecondsUntilNextCapture(SCREENSHOT_INTERVAL_SECONDS);
+          return;
+        }
+      }
+
+      // For automatic captures, storage must also be configured to save screenshots
+      if (!isManual && !isStorageConfigured) {
+        setScreenCaptureError(
+          "Automatic screenshot skipped: Cloud storage is not configured. Screen captures cannot be stored."
+        );
+        nextCaptureTimeRef.current = Date.now() + SCREENSHOT_CAPTURE_INTERVAL_MS;
+        setSecondsUntilNextCapture(SCREENSHOT_INTERVAL_SECONDS);
+        return;
+      }
+
       isCapturingRef.current = true;
       setIsCapturingSnapshot(true);
-      setErrorMessage(null);
 
       let imageUrl: string | undefined = undefined;
 
       // Only extract frame if screen sharing stream is active and video track is live
-      if (screenStreamRef.current && screenStreamRef.current.active) {
-        const videoTrack = screenStreamRef.current.getVideoTracks()[0];
-        if (videoTrack && videoTrack.readyState === "live") {
-          // Attempt 1: ImageCapture API if supported
+      if (isStreamActive && screenStreamRef.current) {
+        const videoTrack = screenStreamRef.current.getVideoTracks().find((t) => t.readyState === "live");
+        if (videoTrack) {
+          // Attempt 1: Persistent in-DOM video element (most reliable, zero timeouts, works across background tabs)
           try {
-            if (typeof window !== "undefined" && "ImageCapture" in window) {
-              const ImageCaptureClass = (
-                window as unknown as {
-                  ImageCapture: new (
-                    track: MediaStreamTrack
-                  ) => { grabFrame: () => Promise<ImageBitmap> };
-                }
-              ).ImageCapture;
-              const captureInstance = new ImageCaptureClass(videoTrack);
-              const bitmap = await captureInstance.grabFrame();
+            const vid = videoElementRef.current;
+            if (vid && vid.videoWidth > 0 && vid.videoHeight > 0) {
               const canvas = document.createElement("canvas");
-              canvas.width = Math.min(1280, bitmap.width);
+              canvas.width = Math.min(1280, vid.videoWidth);
               canvas.height = Math.min(
                 720,
-                Math.round((canvas.width / bitmap.width) * bitmap.height)
+                Math.round((canvas.width / vid.videoWidth) * vid.videoHeight)
               );
               const ctx = canvas.getContext("2d");
               if (ctx) {
-                ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
                 imageUrl = canvas.toDataURL("image/webp", 0.7);
               }
             }
-          } catch {
-            // Fallback to video element below
+          } catch (e) {
+            console.warn("Primary in-DOM video capture error:", e);
           }
 
-          // Attempt 2: Offscreen video element canvas rendering
+          // Attempt 2: ImageCapture API if supported and not yet extracted
           if (!imageUrl) {
             try {
-              const video = document.createElement("video");
+              if (typeof window !== "undefined" && "ImageCapture" in window) {
+                const ImageCaptureClass = (
+                  window as unknown as {
+                    ImageCapture: new (
+                      track: MediaStreamTrack
+                    ) => { grabFrame: () => Promise<ImageBitmap> };
+                  }
+                ).ImageCapture;
+                const captureInstance = new ImageCaptureClass(videoTrack);
+                const bitmap = await captureInstance.grabFrame();
+                const canvas = document.createElement("canvas");
+                canvas.width = Math.min(1280, bitmap.width);
+                canvas.height = Math.min(
+                  720,
+                  Math.round((canvas.width / bitmap.width) * bitmap.height)
+                );
+                const ctx = canvas.getContext("2d");
+                if (ctx) {
+                  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                  imageUrl = canvas.toDataURL("image/webp", 0.7);
+                }
+              }
+            } catch {
+              // Fallback to offscreen video element below
+            }
+          }
+
+          // Attempt 3: Offscreen video element canvas rendering
+          if (!imageUrl) {
+            let video: HTMLVideoElement | null = null;
+            try {
+              video = document.createElement("video");
               video.muted = true;
               video.playsInline = true;
               video.srcObject = screenStreamRef.current;
               await new Promise<void>((resolve, reject) => {
                 const timer = setTimeout(() => resolve(), 1200);
+                if (!video) return resolve();
                 video.onloadedmetadata = () => {
-                  video
+                  video!
                     .play()
                     .then(() => {
                       clearTimeout(timer);
@@ -285,7 +381,7 @@ export function FreelancerTimeTrackerWidget({
                 };
               });
 
-              if (video.videoWidth > 0 && video.videoHeight > 0) {
+              if (video && video.videoWidth > 0 && video.videoHeight > 0) {
                 const canvas = document.createElement("canvas");
                 canvas.width = Math.min(1280, video.videoWidth);
                 canvas.height = Math.min(
@@ -298,14 +394,34 @@ export function FreelancerTimeTrackerWidget({
                   imageUrl = canvas.toDataURL("image/webp", 0.7);
                 }
               }
-              video.srcObject = null;
             } catch (err) {
               console.warn("Video element capture error:", err);
+            } finally {
+              if (video) {
+                try {
+                  video.pause();
+                } catch {
+                  // ignore
+                }
+                video.srcObject = null;
+              }
             }
           }
         } else {
           stopScreenStream();
         }
+      }
+
+      // If automatic capture failed to extract image frame, do not create fake record
+      if (!isManual && !imageUrl) {
+        if (isMountedRef.current) {
+          setScreenCaptureError("Failed to extract screen frame from active stream. Next capture in 10 minutes.");
+          isCapturingRef.current = false;
+          setIsCapturingSnapshot(false);
+          nextCaptureTimeRef.current = Date.now() + SCREENSHOT_CAPTURE_INTERVAL_MS;
+          setSecondsUntilNextCapture(SCREENSHOT_INTERVAL_SECONDS);
+        }
+        return;
       }
 
       try {
@@ -317,30 +433,42 @@ export function FreelancerTimeTrackerWidget({
           memo: descriptionRef.current || "Active work interval",
         });
 
+        if (!isMountedRef.current) return;
+
         if (res.success) {
           setSuccessNotice(
             isManual
-              ? "Manual activity snapshot recorded successfully."
+              ? (imageUrl ? "Manual activity snapshot recorded successfully." : "Manual activity snapshot recorded (activity metrics only).")
               : "Automatic 10-minute snapshot recorded."
           );
-          setTimeout(() => setSuccessNotice(null), 3500);
-          onSessionUpdated?.();
+          setTimeout(() => {
+            if (isMountedRef.current) setSuccessNotice(null);
+          }, 3500);
+          onSessionUpdatedRef.current?.();
         } else {
           setErrorMessage(res.error || "Failed to record snapshot.");
         }
       } catch (err) {
         console.error("Snapshot recording error:", err);
-        setErrorMessage("Unexpected error while recording snapshot.");
+        if (isMountedRef.current) {
+          setErrorMessage("Unexpected error while recording snapshot.");
+        }
       } finally {
         isCapturingRef.current = false;
-        setIsCapturingSnapshot(false);
-        // Reset 10-minute countdown target for the next capture
-        nextCaptureTimeRef.current = Date.now() + SCREENSHOT_CAPTURE_INTERVAL_MS;
-        setSecondsUntilNextCapture(SCREENSHOT_INTERVAL_SECONDS);
+        if (isMountedRef.current) {
+          setIsCapturingSnapshot(false);
+          // Reset 10-minute countdown target for the next capture
+          nextCaptureTimeRef.current = Date.now() + SCREENSHOT_CAPTURE_INTERVAL_MS;
+          setSecondsUntilNextCapture(SCREENSHOT_INTERVAL_SECONDS);
+        }
       }
     },
-    [activeEntryId, status, onSessionUpdated, stopScreenStream]
+    [activeEntryId, status, isStorageConfigured, stopScreenStream]
   );
+
+  useEffect(() => {
+    performSnapshotCaptureRef.current = performSnapshotCapture;
+  }, [performSnapshotCapture]);
 
   // Automated 10-Minute Work Activity Snapshot Loop & Countdown
   useEffect(() => {
@@ -365,17 +493,22 @@ export function FreelancerTimeTrackerWidget({
       if (remaining <= 0) {
         nextCaptureTimeRef.current = Date.now() + SCREENSHOT_CAPTURE_INTERVAL_MS;
         setSecondsUntilNextCapture(SCREENSHOT_INTERVAL_SECONDS);
-        performSnapshotCapture(false);
+        performSnapshotCaptureRef.current?.(false);
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [status, activeEntryId, performSnapshotCapture]);
+  }, [status, activeEntryId]);
 
   // 5. Timer Controls
-  const handleStart = () => {
+  const handleStart = async () => {
     setErrorMessage(null);
     setSuccessNotice(null);
+
+    // Proactively request screen sharing permission if supported and not active
+    if (isScreenCaptureSupported && !screenShareActive) {
+      await requestScreenShareStream();
+    }
 
     startTransition(async () => {
       const res = await startTimeTrackingAction({
@@ -426,10 +559,15 @@ export function FreelancerTimeTrackerWidget({
     });
   };
 
-  const handleResume = () => {
+  const handleResume = async () => {
     if (!activeEntryId) return;
     setErrorMessage(null);
     setSuccessNotice(null);
+
+    // Prompt for screen sharing reactivation if supported and not active
+    if (isScreenCaptureSupported && !screenShareActive) {
+      await requestScreenShareStream();
+    }
 
     startTransition(async () => {
       const res = await resumeTimeTrackingAction({ timeEntryId: activeEntryId });
@@ -569,10 +707,8 @@ export function FreelancerTimeTrackerWidget({
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-2.5 text-xs text-emerald-900 dark:text-emerald-200">
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-semibold">Automatic screenshots enabled</span>
-                <span className="text-zinc-400 dark:text-zinc-500">•</span>
-                <span>
-                  Next capture in:{" "}
+                <span className="font-semibold">
+                  Automatic screenshots enabled — next capture in{" "}
                   <strong className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
                     {formatCountdown(secondsUntilNextCapture)}
                   </strong>
@@ -586,9 +722,9 @@ export function FreelancerTimeTrackerWidget({
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200">
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                <span className="font-semibold">Screen sharing permission required</span>
+                <span className="font-semibold">Screen sharing permission required for automatic screenshots</span>
                 <span className="text-zinc-400 dark:text-zinc-500">•</span>
-                <span>Screenshots paused (Activity metrics recorded only)</span>
+                <span>Automatic captures paused</span>
               </div>
               {isScreenCaptureSupported && (
                 <button
@@ -790,6 +926,17 @@ export function FreelancerTimeTrackerWidget({
           • <strong>Billing Calculation:</strong> Calculated billing totals are mathematical projections using the contract&apos;s agreed hourly rate. No automated credit card charges or payouts occur automatically.
         </p>
       </div>
+
+      {/* Hidden persistent video element for reliable frame extraction */}
+      <video
+        ref={videoElementRef}
+        autoPlay
+        muted
+        playsInline
+        aria-hidden="true"
+        className="fixed -top-[9999px] -left-[9999px] w-1 h-1 opacity-0 pointer-events-none"
+      />
     </div>
   );
 }
+

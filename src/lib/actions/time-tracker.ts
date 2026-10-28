@@ -38,6 +38,7 @@ export type WorkSnapshotResult = {
   snapshotId?: string;
   timestamp?: string;
   activityScore?: number;
+  imageUrl?: string | null;
   error?: string;
 };
 
@@ -630,8 +631,9 @@ export async function recordWorkSnapshotAction(
     });
 
     // If image payload provided and storage configured, store image and link route URL
+    let storedImageUrl: string | null = null;
     if (imageUrl) {
-      const { routeUrl } = await processScreenshotStorage(
+      const { routeUrl, reason } = await processScreenshotStorage(
         entry.contractId,
         entry.id,
         snapshot.id,
@@ -639,10 +641,19 @@ export async function recordWorkSnapshotAction(
       );
 
       if (routeUrl) {
+        storedImageUrl = routeUrl;
         await prisma.timeScreenshot.update({
           where: { id: snapshot.id },
           data: { imageUrl: routeUrl },
         });
+      } else if (reason === "UPLOAD_FAILED") {
+        await prisma.timeScreenshot.delete({
+          where: { id: snapshot.id },
+        });
+        return {
+          success: false,
+          error: "Failed to upload screenshot to secure storage.",
+        };
       }
     }
 
@@ -651,6 +662,7 @@ export async function recordWorkSnapshotAction(
       snapshotId: snapshot.id,
       timestamp: snapshot.timestamp.toISOString(),
       activityScore: snapshot.activityScore,
+      imageUrl: storedImageUrl,
     };
   } catch (error) {
     console.error(

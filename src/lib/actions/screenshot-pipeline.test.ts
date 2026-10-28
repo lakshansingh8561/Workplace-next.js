@@ -26,6 +26,7 @@ vi.mock("@/lib/prisma", () => ({
     timeScreenshot: {
       create: vi.fn(),
       update: vi.fn(),
+      delete: vi.fn(),
       findUnique: vi.fn(),
     },
   },
@@ -731,6 +732,55 @@ describe("Screenshot Pipeline & Protected Storage Verification", () => {
           imageUrl: `/api/contracts/${contractId}/screenshots/${screenshotId}`,
         },
       });
+    });
+
+    it("handles storage upload failure safely by deleting created record and returning error", async () => {
+      process.env.CLOUDINARY_CLOUD_NAME = "workpulse-cloud";
+      process.env.CLOUDINARY_API_KEY = "123456789";
+      process.env.CLOUDINARY_API_SECRET = "secret";
+
+      vi.mocked(getCurrentUser).mockResolvedValue({
+        id: freelancerId,
+        role: "FREELANCER",
+      } as any);
+
+      vi.mocked(prisma.timeEntry.findUnique).mockResolvedValue({
+        id: timeEntryId,
+        freelancerId,
+        contractId,
+        status: TimeTrackingStatus.RECORDING,
+        contract: {
+          type: PaymentType.HOURLY,
+        },
+      } as any);
+
+      vi.mocked(prisma.timeScreenshot.create).mockResolvedValue({
+        id: screenshotId,
+        timestamp: new Date(),
+        activityScore: 85,
+      } as any);
+
+      vi.mocked(prisma.timeScreenshot.delete).mockResolvedValue({
+        id: screenshotId,
+      } as any);
+
+      // Force upload failure
+      vi.spyOn(cloudinary.uploader, "upload").mockRejectedValue(new Error("Cloudinary connection failed"));
+
+      const res = await recordWorkSnapshotAction({
+        timeEntryId,
+        imageUrl: validSampleBase64,
+        keystrokes: 50,
+        mouseEvents: 50,
+        memo: "Automatic snapshot during network drop",
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toBe("Failed to upload screenshot to secure storage.");
+      expect(prisma.timeScreenshot.delete).toHaveBeenCalledWith({
+        where: { id: screenshotId },
+      });
+      expect(prisma.timeScreenshot.update).not.toHaveBeenCalled();
     });
   });
 });
