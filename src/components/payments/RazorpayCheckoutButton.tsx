@@ -48,64 +48,86 @@ declare global {
   }
 }
 
-function loadRazorpayScript(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (typeof window === "undefined") {
-      resolve(false);
-      return;
-    }
+let razorpayScriptPromise: Promise<boolean> | null = null;
+
+export function loadRazorpayScript(): Promise<boolean> {
+  if (typeof window === "undefined") {
+    return Promise.resolve(false);
+  }
+  if (window.Razorpay) {
+    return Promise.resolve(true);
+  }
+  if (razorpayScriptPromise) {
+    return razorpayScriptPromise;
+  }
+
+  razorpayScriptPromise = new Promise<boolean>((resolve) => {
+    // 1. Direct check if constructor was defined while promise was created
     if (window.Razorpay) {
       resolve(true);
       return;
     }
 
-    // Check if an existing script tag is already attached
-    const existingScript = document.querySelector('script[src*="checkout.razorpay.com"]') as HTMLScriptElement | null;
+    // 2. Check if an existing script tag is already in the document
+    const existingScript = document.querySelector(
+      'script[src*="checkout.razorpay.com"]'
+    ) as HTMLScriptElement | null;
+
     if (existingScript) {
       if (window.Razorpay) {
         resolve(true);
         return;
       }
+
       existingScript.addEventListener("load", () => {
         resolve(Boolean(window.Razorpay));
       });
       existingScript.addEventListener("error", () => {
-        existingScript.remove();
-        insertNewScript();
+        console.warn("[WorkPulse Razorpay]: Existing checkout.js failed to load.");
+        razorpayScriptPromise = null;
+        resolve(false);
       });
 
-      // Quick fallback if already evaluated
+      // Polling fallback in case load event fired before listener was attached
+      const interval = setInterval(() => {
+        if (window.Razorpay) {
+          clearInterval(interval);
+          resolve(true);
+        }
+      }, 100);
+
       setTimeout(() => {
+        clearInterval(interval);
         if (window.Razorpay) {
           resolve(true);
         } else {
-          insertNewScript();
+          razorpayScriptPromise = null;
+          resolve(false);
         }
-      }, 1500);
+      }, 3000);
       return;
     }
 
-    insertNewScript();
+    // 3. Insert new script element dynamically
+    const script = document.createElement("script");
+    script.id = "razorpay-checkout-sdk";
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => {
+      resolve(Boolean(window.Razorpay));
+    };
+    script.onerror = () => {
+      console.warn(
+        "[WorkPulse Razorpay]: Unable to download checkout.js. If an ad-blocker or Brave Shields is running, it may be blocking checkout.razorpay.com."
+      );
+      razorpayScriptPromise = null;
+      resolve(false);
+    };
 
-    function insertNewScript() {
-      // Remove any stale failed script tag
-      const stale = document.getElementById("razorpay-checkout-sdk");
-      if (stale) stale.remove();
-
-      const script = document.createElement("script");
-      script.id = "razorpay-checkout-sdk";
-      script.src = "https://checkout.razorpay.com/v1/checkout.js";
-      script.async = true;
-      script.onload = () => resolve(Boolean(window.Razorpay));
-      script.onerror = () => {
-        console.warn(
-          "[WorkPulse Razorpay]: Unable to download checkout.js. If an ad-blocker or Brave Shields is running, it may be blocking checkout.razorpay.com."
-        );
-        resolve(false);
-      };
-      document.body.appendChild(script);
-    }
+    document.body.appendChild(script);
   });
+
+  return razorpayScriptPromise;
 }
 
 interface RazorpayPaymentButtonProps {
@@ -181,7 +203,7 @@ export function RazorpayPaymentButton({
       const rzp = new window.Razorpay({
         key: keyId,
         amount: amountSubunits || 0,
-        currency: currency || "INR",
+        currency: currency || "USD",
         name: "WorkPulse Marketplace",
         description: `Payment for ${title || "contract deliverable"}`,
         order_id: orderId,

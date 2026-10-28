@@ -5,6 +5,7 @@ import {
   createMilestonePaymentOrderAction,
   createTimesheetPaymentOrderAction,
   verifyPaymentSignatureAction,
+  getFreelancerPaymentsAction,
 } from "./payment";
 import { POST as webhookHandler } from "@/app/api/webhooks/razorpay/route";
 import { prisma } from "@/lib/prisma";
@@ -22,6 +23,7 @@ import {
   MilestoneStatus,
   TimeTrackingStatus,
   TimesheetReviewStatus,
+  Role,
 } from "@prisma/client";
 
 // Mock Razorpay SDK
@@ -52,6 +54,8 @@ vi.mock("@/lib/prisma", () => ({
     payment: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
@@ -87,7 +91,7 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
     process.env.RAZORPAY_TEST_KEY = "rzp_test_mockKey123";
     process.env.RAZORPAY_TEST_SECRET = testKeySecret;
     process.env.RAZORPAY_WEBHOOK_SECRET = "whsec_test_secret_999";
-    process.env.RAZORPAY_CURRENCY = "INR";
+    process.env.RAZORPAY_CURRENCY = "USD";
   });
 
   describe("Security: Protecting Razorpay Secrets from Client-Side Code", () => {
@@ -95,10 +99,16 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
       const publicConfig = getRazorpayPublicConfig();
       expect(publicConfig.keyId).toBe("rzp_test_mockKey123");
       expect(publicConfig.isTestMode).toBe(true);
-      expect(publicConfig.currency).toBe("INR");
+      expect(publicConfig.currency).toBe("USD");
       expect((publicConfig as any).keySecret).toBeUndefined();
       expect((publicConfig as any).secret).toBeUndefined();
       expect((publicConfig as any).webhookSecret).toBeUndefined();
+    });
+
+    it("defaults currency to USD when RAZORPAY_CURRENCY is undefined", () => {
+      delete process.env.RAZORPAY_CURRENCY;
+      const publicConfig = getRazorpayPublicConfig();
+      expect(publicConfig.currency).toBe("USD");
     });
   });
 
@@ -286,7 +296,7 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
       mockOrdersCreate.mockResolvedValue({
         id: "order_mock123",
         amount: 35050,
-        currency: "INR",
+        currency: "USD",
         status: "created",
       });
 
@@ -303,6 +313,7 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
       expect(res.success).toBe(true);
       expect(res.orderId).toBe("order_mock123");
       expect(res.amountSubunits).toBe(35050); // 350.50 * 100
+      expect(res.currency).toBe("USD");
       expect(res.keyId).toBe("rzp_test_mockKey123");
       expect(res.isTestMode).toBe(true);
 
@@ -310,7 +321,7 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
       expect(mockOrdersCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           amount: 35050,
-          currency: "INR",
+          currency: "USD",
         })
       );
     });
@@ -397,8 +408,8 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
 
       mockOrdersCreate.mockResolvedValue({
         id: "order_hourly_456",
-        amount: 20000, // (120.50 + 79.50) * 100 = 20000 paise
-        currency: "INR",
+        amount: 20000, // (120.50 + 79.50) * 100 = 20000 cents ($200.00)
+        currency: "USD",
         status: "created",
       });
 
@@ -415,10 +426,11 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
       expect(res.success).toBe(true);
       expect(res.orderId).toBe("order_hourly_456");
       expect(res.amountSubunits).toBe(20000);
+      expect(res.currency).toBe("USD");
       expect(mockOrdersCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           amount: 20000,
-          currency: "INR",
+          currency: "USD",
         })
       );
     });
@@ -630,6 +642,46 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
       expect(json.error).toMatch(/Invalid webhook signature/i);
     });
 
+    it("fails closed with 500 when RAZORPAY_WEBHOOK_SECRET is missing or undefined", async () => {
+      delete process.env.RAZORPAY_WEBHOOK_SECRET;
+
+      const rawBody = JSON.stringify({ event: "payment.captured" });
+      const request = new Request("http://localhost:3000/api/webhooks/razorpay", {
+        method: "POST",
+        headers: {
+          "x-razorpay-signature": "any_signature",
+        },
+        body: rawBody,
+      });
+
+      const response = await webhookHandler(request);
+      expect(response.status).toBe(500);
+      const json = await response.json();
+      expect(json.error).toMatch(/Webhook service is unconfigured/i);
+      expect(prisma.payment.findUnique).not.toHaveBeenCalled();
+      expect(prisma.payment.update).not.toHaveBeenCalled();
+    });
+
+    it("fails closed with 500 when RAZORPAY_WEBHOOK_SECRET is an empty string", async () => {
+      process.env.RAZORPAY_WEBHOOK_SECRET = "   ";
+
+      const rawBody = JSON.stringify({ event: "payment.captured" });
+      const request = new Request("http://localhost:3000/api/webhooks/razorpay", {
+        method: "POST",
+        headers: {
+          "x-razorpay-signature": "any_signature",
+        },
+        body: rawBody,
+      });
+
+      const response = await webhookHandler(request);
+      expect(response.status).toBe(500);
+      const json = await response.json();
+      expect(json.error).toMatch(/Webhook service is unconfigured/i);
+      expect(prisma.payment.findUnique).not.toHaveBeenCalled();
+      expect(prisma.payment.update).not.toHaveBeenCalled();
+    });
+
     it("handles duplicate webhook delivery idempotently without modifying database records", async () => {
       const orderId = "order_wh_1";
       const payload = {
@@ -760,4 +812,293 @@ describe("WorkPulse Razorpay Payment Gateway Integration", () => {
       );
     });
   });
+
+  describe("Razorpay Minimum Transaction Limits & CSP Security Compliance", () => {
+    it("rejects timesheet payment order when amount is below 100 paise in INR", async () => {
+      (getCurrentUser as any).mockResolvedValue({ id: clientId, role: "CLIENT" });
+      (prisma.contract.findUnique as any).mockResolvedValue({
+        id: contractId,
+        title: "Hourly Consulting",
+        type: PaymentType.HOURLY,
+        status: ContractStatus.ACTIVE,
+        clientId,
+        freelancerId,
+      });
+
+      // 45 seconds at $45/hr -> $0.56 (56 paise in INR)
+      (prisma.timeEntry.findMany as any).mockResolvedValue([
+        {
+          id: timeEntryId1,
+          contractId,
+          status: TimeTrackingStatus.STOPPED,
+          reviewStatus: TimesheetReviewStatus.APPROVED,
+          isPaid: false,
+          billableAmount: 0.56,
+        },
+      ]);
+
+      process.env.RAZORPAY_CURRENCY = "INR";
+
+      const res = await createTimesheetPaymentOrderAction({
+        contractId,
+        timeEntryIds: [timeEntryId1],
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/below Razorpay's minimum transaction limit/i);
+      expect(res.error).toContain("₹1.00");
+    });
+
+    it("accepts timesheet payment order when amount is $0.58 (46s @ $45/hr) in USD (>= 50 cents)", async () => {
+      (getCurrentUser as any).mockResolvedValue({ id: clientId, role: "CLIENT" });
+      (prisma.contract.findUnique as any).mockResolvedValue({
+        id: contractId,
+        title: "Hourly Consulting",
+        type: PaymentType.HOURLY,
+        status: ContractStatus.ACTIVE,
+        clientId,
+        freelancerId,
+      });
+
+      // 46 seconds at $45/hr: (46/3600) * 45 = $0.575 -> $0.58 USD
+      (prisma.timeEntry.findMany as any).mockResolvedValue([
+        {
+          id: timeEntryId1,
+          contractId,
+          status: TimeTrackingStatus.STOPPED,
+          reviewStatus: TimesheetReviewStatus.APPROVED,
+          isPaid: false,
+          billableAmount: 0.58,
+        },
+      ]);
+      (prisma.payment.findFirst as any).mockResolvedValue(null);
+
+      mockOrdersCreate.mockResolvedValue({
+        id: "order_usd_58",
+        amount: 58,
+        currency: "USD",
+        status: "created",
+      });
+
+      (prisma.payment.create as any).mockResolvedValue({
+        id: "payrec_usd_58",
+        razorpayOrderId: "order_usd_58",
+      });
+
+      process.env.RAZORPAY_CURRENCY = "USD";
+
+      const res = await createTimesheetPaymentOrderAction({
+        contractId,
+        timeEntryIds: [timeEntryId1],
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.orderId).toBe("order_usd_58");
+      expect(res.amountSubunits).toBe(58); // 58 cents USD
+      expect(res.currency).toBe("USD");
+      expect(mockOrdersCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 58,
+          currency: "USD",
+        })
+      );
+    });
+
+    it("rejects timesheet payment order when amount is below 50 cents in USD", async () => {
+      (getCurrentUser as any).mockResolvedValue({ id: clientId, role: "CLIENT" });
+      (prisma.contract.findUnique as any).mockResolvedValue({
+        id: contractId,
+        title: "Hourly Consulting",
+        type: PaymentType.HOURLY,
+        status: ContractStatus.ACTIVE,
+        clientId,
+        freelancerId,
+      });
+
+      // 20 seconds at $45/hr -> $0.25 (25 cents USD < 50 cents)
+      (prisma.timeEntry.findMany as any).mockResolvedValue([
+        {
+          id: timeEntryId1,
+          contractId,
+          status: TimeTrackingStatus.STOPPED,
+          reviewStatus: TimesheetReviewStatus.APPROVED,
+          isPaid: false,
+          billableAmount: 0.25,
+        },
+      ]);
+
+      process.env.RAZORPAY_CURRENCY = "USD";
+
+      const res = await createTimesheetPaymentOrderAction({
+        contractId,
+        timeEntryIds: [timeEntryId1],
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/below Razorpay's minimum transaction limit/i);
+      expect(res.error).toContain("USD 0.50");
+    });
+
+    it("verifies nextConfig Content Security Policy includes Razorpay script and frame sources", async () => {
+      const nextConfigModule = await import("../../../next.config");
+      const nextConfig = nextConfigModule.default;
+
+      if (nextConfig.headers) {
+        const headerConfigs = await nextConfig.headers();
+        const globalHeaders = headerConfigs.find((h: any) => h.source === "/:path*");
+        expect(globalHeaders).toBeDefined();
+
+        const cspHeader = globalHeaders?.headers.find(
+          (h: any) => h.key === "Content-Security-Policy"
+        );
+        expect(cspHeader).toBeDefined();
+        const cspValue = cspHeader?.value || "";
+
+        // Must permit script from checkout.razorpay.com
+        expect(cspValue).toContain("https://checkout.razorpay.com");
+        // Must permit iframe from api.razorpay.com and checkout.razorpay.com
+        expect(cspValue).toContain("frame-src");
+        expect(cspValue).toContain("https://api.razorpay.com");
+      }
+    });
+  });
+
+  describe("Freelancer Payments & Earnings Action (getFreelancerPaymentsAction)", () => {
+    it("fails if user is not authenticated", async () => {
+      (getCurrentUser as any).mockResolvedValue(null);
+
+      const res = await getFreelancerPaymentsAction();
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/Authentication required/i);
+      expect(res.payments).toEqual([]);
+    });
+
+    it("fails if caller is a CLIENT", async () => {
+      (getCurrentUser as any).mockResolvedValue({ id: clientId, role: Role.CLIENT });
+
+      const res = await getFreelancerPaymentsAction();
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/Only freelancers can access the earnings dashboard/i);
+      expect(res.payments).toEqual([]);
+    });
+
+    it("enforces strict data isolation by scoping database query to recipientId and contract.freelancerId", async () => {
+      (getCurrentUser as any).mockResolvedValue({ id: freelancerId, role: Role.FREELANCER });
+      (prisma.payment.findMany as any)
+        .mockResolvedValueOnce([]) // for aggregate calculation
+        .mockResolvedValueOnce([]); // for paginated records
+      (prisma.payment.count as any).mockResolvedValue(0);
+
+      const res = await getFreelancerPaymentsAction();
+      expect(res.success).toBe(true);
+      expect(prisma.payment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            recipientId: freelancerId,
+            contract: { freelancerId },
+          }),
+        })
+      );
+    });
+
+    it("handles empty payment history gracefully with zeroed summary totals", async () => {
+      (getCurrentUser as any).mockResolvedValue({ id: freelancerId, role: Role.FREELANCER });
+      (prisma.payment.findMany as any)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      (prisma.payment.count as any).mockResolvedValue(0);
+
+      const res = await getFreelancerPaymentsAction();
+      expect(res.success).toBe(true);
+      expect(res.payments).toEqual([]);
+      expect(res.summary.totalEarnings).toBe(0);
+      expect(res.summary.pendingAmount).toBe(0);
+      expect(res.summary.settledCount).toBe(0);
+      expect(res.summary.pendingCount).toBe(0);
+      expect(res.summary.failedCount).toBe(0);
+      expect(res.totalPayments).toBe(0);
+    });
+
+    it("calculates accurate financial summaries: sums only SUCCESS for earnings and segregates PENDING", async () => {
+      (getCurrentUser as any).mockResolvedValue({ id: freelancerId, role: Role.FREELANCER });
+
+      // Aggregate query mock
+      (prisma.payment.findMany as any)
+        .mockResolvedValueOnce([
+          { amount: 150.0, status: PaymentStatus.SUCCESS, currency: "USD" },
+          { amount: 45.5, status: PaymentStatus.SUCCESS, currency: "USD" },
+          { amount: 80.0, status: PaymentStatus.PENDING, currency: "USD" },
+          { amount: 200.0, status: PaymentStatus.FAILED, currency: "USD" },
+        ])
+        // Paginated query mock
+        .mockResolvedValueOnce([
+          {
+            id: "pay_1",
+            contractId,
+            payerId: clientId,
+            recipientId: freelancerId,
+            itemType: PaymentItemType.MILESTONE,
+            amount: 150.0,
+            currency: "USD",
+            status: PaymentStatus.SUCCESS,
+            razorpayOrderId: "order_1",
+            razorpayPaymentId: "rzp_1",
+            paidAt: new Date(),
+            createdAt: new Date(),
+            timeEntryIds: [],
+            contract: { id: contractId, title: "Web Platform Development", type: PaymentType.FIXED },
+            payer: { id: clientId, name: "Acme Corp", email: "client@acme.com", image: null },
+            milestone: { id: milestoneId, title: "Milestone 1 - Design & Prototype" },
+          },
+        ]);
+      (prisma.payment.count as any).mockResolvedValue(4);
+
+      const res = await getFreelancerPaymentsAction();
+      expect(res.success).toBe(true);
+      expect(res.summary.totalEarnings).toBe(195.5); // 150.00 + 45.50
+      expect(res.summary.pendingAmount).toBe(80.0); // 80.00
+      expect(res.summary.settledCount).toBe(2);
+      expect(res.summary.pendingCount).toBe(1);
+      expect(res.summary.failedCount).toBe(1);
+      expect(res.summary.totalTransactions).toBe(4);
+      expect(res.payments.length).toBe(1);
+      expect(res.payments[0].clientName).toBe("Acme Corp");
+      expect(res.payments[0].milestoneTitle).toBe("Milestone 1 - Design & Prototype");
+    });
+
+    it("applies status, deliverable type, and search filters correctly to query", async () => {
+      (getCurrentUser as any).mockResolvedValue({ id: freelancerId, role: Role.FREELANCER });
+      (prisma.payment.findMany as any)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      (prisma.payment.count as any).mockResolvedValue(0);
+
+      const res = await getFreelancerPaymentsAction({
+        status: "SUCCESS",
+        type: "HOURLY_TIMESHEET",
+        search: "Acme",
+        page: 2,
+        limit: 5,
+      });
+
+      expect(res.success).toBe(true);
+      expect(prisma.payment.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            recipientId: freelancerId,
+            status: PaymentStatus.SUCCESS,
+            itemType: PaymentItemType.HOURLY_TIMESHEET,
+            OR: expect.arrayContaining([
+              { contract: { title: { contains: "Acme", mode: "insensitive" } } },
+              { payer: { name: { contains: "Acme", mode: "insensitive" } } },
+              { razorpayOrderId: { contains: "Acme", mode: "insensitive" } },
+            ]),
+          }),
+          skip: 5,
+          take: 5,
+        })
+      );
+    });
+  });
 });
+

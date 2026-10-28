@@ -20,19 +20,29 @@ export async function POST(request: Request) {
 
     const { webhookSecret } = getRazorpayCredentials();
 
-    // Verify webhook signature if secret is configured
-    if (webhookSecret) {
-      const isValid = verifyRazorpayWebhookSignature({ rawBody, signature });
-      if (!isValid) {
-        console.warn("[WorkPulse Razorpay Webhook] Invalid webhook signature detected.");
-        return NextResponse.json(
-          { error: "Invalid webhook signature." },
-          { status: 401 }
-        );
-      }
-    } else {
-      console.warn(
-        "[WorkPulse Razorpay Webhook] RAZORPAY_WEBHOOK_SECRET is not configured. Webhook received without signature verification."
+    // Security Guard: Fail closed if webhook secret is not configured
+    if (!webhookSecret || webhookSecret.trim() === "") {
+      console.error(
+        "[WorkPulse Razorpay Webhook] RAZORPAY_WEBHOOK_SECRET is not configured. Rejecting request to prevent unauthenticated processing."
+      );
+      return NextResponse.json(
+        { error: "Webhook service is unconfigured." },
+        { status: 500 }
+      );
+    }
+
+    // Cryptographic HMAC-SHA256 verification against the exact raw request body
+    const isValid = verifyRazorpayWebhookSignature({
+      rawBody,
+      signature,
+      webhookSecret,
+    });
+
+    if (!isValid) {
+      console.warn("[WorkPulse Razorpay Webhook] Invalid webhook signature detected.");
+      return NextResponse.json(
+        { error: "Invalid webhook signature." },
+        { status: 401 }
       );
     }
 

@@ -463,7 +463,7 @@ model Payment {
   timeEntryIds      String[]
 
   amount            Float
-  currency          String             @default("INR")
+  currency          String             @default("USD")
   amountSubunits    Int
 
   razorpayOrderId   String             @unique

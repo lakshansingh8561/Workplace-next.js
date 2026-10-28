@@ -16,7 +16,7 @@ export function getRazorpayCredentials() {
   const keyId = process.env.RAZORPAY_TEST_KEY || process.env.RAZORPAY_KEY_ID || "";
   const keySecret = process.env.RAZORPAY_TEST_SECRET || process.env.RAZORPAY_KEY_SECRET || "";
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || "";
-  const currency = process.env.RAZORPAY_CURRENCY || "INR";
+  const currency = process.env.RAZORPAY_CURRENCY || "USD";
 
   return {
     keyId,

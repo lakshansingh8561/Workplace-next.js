@@ -52,11 +52,14 @@ function useActiveNav() {
     if (href === "/dashboard/client") {
       return pathname.startsWith("/dashboard/client");
     }
+    if (href === "/dashboard/freelancer/payments") {
+      return pathname === "/dashboard/freelancer/payments";
+    }
     if (
       href === "/dashboard/freelancer/proposals" ||
       href === "/dashboard/freelancer"
     ) {
-      return pathname.startsWith("/dashboard/freelancer");
+      return pathname.startsWith("/dashboard/freelancer") && pathname !== "/dashboard/freelancer/payments";
     }
     if (href.startsWith("/contracts")) {
       return pathname.startsWith("/contracts");
@@ -81,35 +84,50 @@ function DesktopNavList({
 }) {
   return user ? (
     <>
-      <Link
-        href={user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"}
-        className={getLinkClass(
-          user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"
-        )}
-      >
-        {user.role === "CLIENT" ? "Dashboard" : "My Proposals"}
-      </Link>
-      <Link href="/jobs" className={getLinkClass("/jobs")}>
-        Find Work
-      </Link>
-      {user.role === "FREELANCER" && (
-        <Link href="/jobs/saved" className={getLinkClass("/jobs/saved")}>
-          Saved Jobs
-        </Link>
+      {user.role === "CLIENT" ? (
+        <>
+          <Link href="/dashboard/client" className={getLinkClass("/dashboard/client")}>
+            Dashboard
+          </Link>
+          <Link
+            href="/#categories"
+            onClick={() => onHashClick?.("#categories")}
+            className={getLinkClass("/#categories")}
+          >
+            Find Talent
+          </Link>
+          <Link href="/contracts" className={getLinkClass("/contracts")}>
+            Contracts
+          </Link>
+          <Link href="/messages" className={getLinkClass("/messages")}>
+            Messages
+          </Link>
+        </>
+      ) : (
+        <>
+          <Link href="/jobs" className={getLinkClass("/jobs")}>
+            Find Work
+          </Link>
+          <Link
+            href="/dashboard/freelancer/proposals"
+            className={getLinkClass("/dashboard/freelancer/proposals")}
+          >
+            My Proposals
+          </Link>
+          <Link href="/contracts" className={getLinkClass("/contracts")}>
+            Contracts
+          </Link>
+          <Link href="/messages" className={getLinkClass("/messages")}>
+            Messages
+          </Link>
+          <Link
+            href="/dashboard/freelancer/payments"
+            className={`hidden 2xl:inline-block ${getLinkClass("/dashboard/freelancer/payments")}`}
+          >
+            Earnings
+          </Link>
+        </>
       )}
-      <Link
-        href="/#categories"
-        onClick={() => onHashClick?.("#categories")}
-        className={getLinkClass("/#categories")}
-      >
-        Find Talent
-      </Link>
-      <Link href="/contracts" className={getLinkClass("/contracts")}>
-        Contracts
-      </Link>
-      <Link href="/messages" className={getLinkClass("/messages")}>
-        Messages
-      </Link>
       <Link
         href="/#enterprise"
         onClick={() => onHashClick?.("#enterprise")}
@@ -227,13 +245,22 @@ function MobileNavList({
         Find Work
       </Link>
       {user.role === "FREELANCER" && (
-        <Link
-          href="/jobs/saved"
-          onClick={closeMenu}
-          className={getLinkClass("/jobs/saved")}
-        >
-          Saved Jobs
-        </Link>
+        <>
+          <Link
+            href="/dashboard/freelancer/payments"
+            onClick={closeMenu}
+            className={getLinkClass("/dashboard/freelancer/payments")}
+          >
+            Earnings & Payments
+          </Link>
+          <Link
+            href="/jobs/saved"
+            onClick={closeMenu}
+            className={getLinkClass("/jobs/saved")}
+          >
+            Saved Jobs
+          </Link>
+        </>
       )}
       <Link
         href="/#categories"
@@ -358,7 +385,7 @@ export function Navbar({ user }: NavbarProps) {
     <header className="sticky top-0 z-50 w-full border-b border-zinc-200/80 bg-white/95 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/90">
       <div className="mx-auto flex h-16 max-w-full items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Brand Logo & Desktop Nav */}
-        <div className="flex items-center gap-4 lg:gap-8 min-w-0">
+        <div className="flex items-center gap-3 lg:gap-6 min-w-0">
           <Link
             href="/"
             className="flex items-center gap-2.5 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-lg p-0.5 shrink-0"
@@ -375,7 +402,7 @@ export function Navbar({ user }: NavbarProps) {
           {/* Desktop Navigation Links */}
           <nav
             aria-label="Main Navigation"
-            className="hidden lg:flex items-center gap-4 xl:gap-6 text-sm font-medium min-w-0"
+            className="hidden lg:flex items-center gap-3 xl:gap-5 text-sm font-medium"
           >
             <Suspense fallback={<DesktopNavListStatic user={user} />}>
               <DesktopNavLinks user={user} />
@@ -384,7 +411,7 @@ export function Navbar({ user }: NavbarProps) {
         </div>
 
         {/* Action Controls (Desktop & Tablet) */}
-        <div className="hidden sm:flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="hidden sm:flex items-center gap-2 sm:gap-3 shrink-0 ml-auto pl-4">
           <Link
             href="/jobs"
             className="hidden xl:flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50/80 px-3.5 py-1.5 text-xs text-zinc-500 hover:border-zinc-300 hover:text-zinc-800 transition-colors dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 mr-1 shrink-0"
@@ -502,6 +529,15 @@ export function Navbar({ user }: NavbarProps) {
                         >
                           <span>📑</span>
                           <span>My Proposals</span>
+                        </Link>
+                        <Link
+                          href="/dashboard/freelancer/payments"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>💳</span>
+                          <span>Earnings & Payments</span>
                         </Link>
                         <Link
                           href="/jobs/saved"
