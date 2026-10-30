@@ -6,6 +6,7 @@ import {
   CreateMilestoneSchema,
   MilestoneActionSchema,
   UpdateContractStatusSchema,
+  DeleteContractSchema,
 } from "@/lib/validations/contract";
 import { revalidatePath } from "next/cache";
 import { ContractStatus, MilestoneStatus, NotificationType } from "@prisma/client";
@@ -518,3 +519,175 @@ export async function updateContractStatusAction(
     };
   }
 }
+
+export type DeleteContractResult = {
+  success: boolean;
+  contractId?: string;
+  error?: string;
+};
+
+/**
+ * Server Action for client owners to safely delete a draft/inactive contract.
+ * Strictly enforces financial and audit record retention:
+ * 1. Caller must be an authenticated CLIENT.
+ * 2. Caller must be the client owner of the contract.
+ * 3. Prohibits deletion if ANY payment record exists for this contract.
+ * 4. Prohibits deletion if ANY logged time-entries exist for this contract.
+ * 5. Prohibits deletion if ANY milestones are in-progress, submitted, approved, or paid.
+ * 6. Only allows deletion of contracts with zero billable history.
+ */
+export async function deleteContractAction(
+  input: unknown
+): Promise<DeleteContractResult> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "You must be signed in to perform this action.",
+    };
+  }
+
+  if (user.role !== "CLIENT") {
+    return {
+      success: false,
+      error: "Unauthorized: Only client accounts can manage contracts.",
+    };
+  }
+
+  const result = DeleteContractSchema.safeParse(input);
+  if (!result.success) {
+    return {
+      success: false,
+      error: "Invalid contract deletion request.",
+    };
+  }
+
+  const { contractId } = result.data;
+
+  try {
+    const contract = await prisma.contract.findUnique({
+      where: { id: contractId },
+      select: {
+        id: true,
+        clientId: true,
+        status: true,
+      },
+    });
+
+    if (!contract) {
+      return {
+        success: false,
+        error: "Contract not found.",
+      };
+    }
+
+    if (contract.clientId !== user.id) {
+      return {
+        success: false,
+        error: "Unauthorized: You do not own this contract.",
+      };
+    }
+
+    // 1. Audit Check: Preserve Payment records
+    const paymentCount = await prisma.payment.count({
+      where: { contractId },
+    });
+
+    if (paymentCount > 0) {
+      return {
+        success: false,
+        error:
+          "Cannot delete contract: Financial records exist. Contracts with payment history must be permanently retained for financial audit compliance.",
+      };
+    }
+
+    // 2. Audit Check: Preserve Time Entries / Timesheets
+    const timeEntryCount = await prisma.timeEntry.count({
+      where: { contractId },
+    });
+
+    if (timeEntryCount > 0) {
+      return {
+        success: false,
+        error:
+          "Cannot delete contract: Timesheet records exist. Contracts with logged time entries must be permanently retained for audit compliance.",
+      };
+    }
+
+    // 3. Audit Check: Check for active or paid milestones
+    const activeMilestone = await prisma.contractMilestone.findFirst({
+      where: {
+        contractId,
+        OR: [
+          { isPaid: true },
+          {
+            status: {
+              in: [
+                MilestoneStatus.ACTIVE,
+                MilestoneStatus.SUBMITTED,
+                MilestoneStatus.APPROVED,
+              ],
+            },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (activeMilestone) {
+      return {
+        success: false,
+        error:
+          "Cannot delete contract: Active or settled milestones exist. Please terminate or complete the contract instead.",
+      };
+    }
+
+    // Safe deletion: Contract has zero financial activity.
+    // Atomically clean up related draft entities and contract.
+    await prisma.$transaction(async (tx) => {
+      // Delete any draft milestones
+      await tx.contractMilestone.deleteMany({
+        where: { contractId },
+      });
+
+      // Delete associated conversation if exists
+      const conversation = await tx.conversation.findUnique({
+        where: { contractId },
+        select: { id: true },
+      });
+
+      if (conversation) {
+        await tx.message.deleteMany({
+          where: { conversationId: conversation.id },
+        });
+        await tx.conversation.delete({
+          where: { id: conversation.id },
+        });
+      }
+
+      await tx.contract.delete({
+        where: { id: contractId },
+      });
+    });
+
+    revalidatePath("/contracts");
+    revalidatePath("/dashboard/client");
+
+    return {
+      success: true,
+      contractId,
+    };
+  } catch (error) {
+    console.error(
+      "[WorkPulse Delete Contract Error]:",
+      error instanceof Error ? error.message : "Database error"
+    );
+
+    return {
+      success: false,
+      error: "Failed to delete contract. Please try again.",
+    };
+  }
+}
+

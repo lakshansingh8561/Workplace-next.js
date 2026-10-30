@@ -51,3 +51,12 @@ export const UpdateContractStatusSchema = z.object({
 });
 
 export type UpdateContractStatusInput = z.infer<typeof UpdateContractStatusSchema>;
+
+export const DeleteContractSchema = z.object({
+  contractId: z
+    .string()
+    .trim()
+    .regex(OBJECT_ID_REGEX, "Invalid Contract ID. Expected a 24-character hexadecimal ObjectId"),
+});
+
+export type DeleteContractInput = z.infer<typeof DeleteContractSchema>;

@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/session";
 import { CreateJobSchema } from "@/lib/validations/job";
 import { PaymentType, ExperienceLevel, JobStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export type CreateJobResult = {
   success: boolean;
@@ -57,6 +58,18 @@ export async function createJobAction(input: unknown): Promise<CreateJobResult> 
   }
 
   const data = result.data;
+
+  // Rate limit job creations (max 5 per hour per client)
+  const rateLimit = await checkRateLimit(`job-create:${user.id}`, {
+    limit: 5,
+    windowMs: 3600_000,
+  });
+  if (!rateLimit.success) {
+    return {
+      success: false,
+      error: "Too many jobs posted recently. Please wait before creating another job.",
+    };
+  }
 
   try {
     const job = await prisma.job.create({

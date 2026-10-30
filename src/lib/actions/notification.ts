@@ -26,7 +26,8 @@ export type NotificationActionResult = {
  * Scoped strictly to session.user.id.
  */
 export async function getNotificationsAction(
-  limit: number = 20
+  limit: number = 30,
+  filter?: "all" | "unread"
 ): Promise<NotificationActionResult> {
   const user = await getCurrentUser();
 
@@ -42,10 +43,18 @@ export async function getNotificationsAction(
   try {
     const safeLimit = Math.min(Math.max(limit, 1), 50);
 
+    const whereClause: { userId: string; read?: boolean } = { userId: user.id };
+    if (filter === "unread") {
+      whereClause.read = false;
+    }
+
     const [notifications, unreadCount] = await Promise.all([
       prisma.notification.findMany({
-        where: { userId: user.id },
-        orderBy: { createdAt: "desc" },
+        where: whereClause,
+        orderBy: [
+          { read: "asc" },
+          { createdAt: "desc" },
+        ],
         take: safeLimit,
       }),
       prisma.notification.count({

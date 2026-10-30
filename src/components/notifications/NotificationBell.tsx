@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   getNotificationsAction,
   markNotificationReadAction,
@@ -19,19 +20,33 @@ interface NotificationItem {
 }
 
 export function NotificationBell() {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"unread" | "all">("unread");
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [, startTransition] = useTransition();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const fetchNotifications = async () => {
+    try {
+      const res = await getNotificationsAction(40);
+      if (res.success && res.notifications) {
+        setNotifications(res.notifications);
+        setUnreadCount(res.unreadCount || 0);
+      }
+    } catch (err) {
+      console.error("Failed to load notifications:", err);
+    }
+  };
+
   useEffect(() => {
     let ignore = false;
 
-    async function fetchNotifications() {
+    async function loadInitial() {
       try {
-        const res = await getNotificationsAction(15);
+        const res = await getNotificationsAction(40);
         if (!ignore && res.success && res.notifications) {
           setNotifications(res.notifications);
           setUnreadCount(res.unreadCount || 0);
@@ -41,10 +56,12 @@ export function NotificationBell() {
       }
     }
 
-    fetchNotifications();
+    loadInitial();
 
     // Sane polling: refresh every 25 seconds
-    const interval = setInterval(fetchNotifications, 25000);
+    const interval = setInterval(() => {
+      fetchNotifications();
+    }, 25000);
 
     return () => {
       ignore = true;
@@ -83,38 +100,57 @@ export function NotificationBell() {
     const nextState = !isOpen;
     setIsOpen(nextState);
     if (nextState) {
-      getNotificationsAction(15).then((res) => {
-        if (res.success && res.notifications) {
-          setNotifications(res.notifications);
-          setUnreadCount(res.unreadCount || 0);
-        }
-      });
+      fetchNotifications();
     }
   };
 
   const handleMarkAllRead = () => {
     startTransition(async () => {
       setIsLoading(true);
-      const res = await markNotificationReadAction({ all: true });
-      if (res.success) {
-        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-        setUnreadCount(0);
+      // Optimistic update immediately
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setUnreadCount(0);
+
+      try {
+        await markNotificationReadAction({ all: true });
+      } catch (err) {
+        console.error("Failed to mark all as read:", err);
+        // Resync from server on failure
+        fetchNotifications();
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
   };
 
-  const handleItemClick = (notification: NotificationItem) => {
-    if (!notification.read) {
-      startTransition(async () => {
-        await markNotificationReadAction({ notificationId: notification.id });
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n))
-        );
-        setUnreadCount((prev) => Math.max(0, prev - 1));
-      });
+  const handleItemClick = async (
+    e: React.MouseEvent,
+    notification: NotificationItem
+  ) => {
+    if (notification.link) {
+      e.preventDefault();
     }
+
+    if (!notification.read) {
+      // Optimistic state update immediately
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n))
+      );
+
+      // Persist read status to database
+      markNotificationReadAction({ notificationId: notification.id }).catch(
+        (err) => {
+          console.error("Failed to mark notification as read:", err);
+        }
+      );
+    }
+
     setIsOpen(false);
+
+    if (notification.link) {
+      router.push(notification.link);
+    }
   };
 
   const formatTime = (dateStr: string) => {
@@ -133,6 +169,12 @@ export function NotificationBell() {
       return "";
     }
   };
+
+  // Filter based on active tab: "unread" displays ONLY unopened notifications
+  const displayedNotifications =
+    activeTab === "unread"
+      ? notifications.filter((n) => !n.read)
+      : notifications;
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -188,27 +230,67 @@ export function NotificationBell() {
                 type="button"
                 onClick={handleMarkAllRead}
                 disabled={isLoading}
-                className="text-[11px] font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 disabled:opacity-50"
+                className="text-[11px] font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 disabled:opacity-50 transition-colors"
               >
                 Mark all as read
               </button>
             )}
           </div>
 
-          {/* List */}
+          {/* Unread / All Filter Tabs */}
+          <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/30 rounded-lg my-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab("unread")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                activeTab === "unread"
+                  ? "bg-white text-zinc-900 shadow-xs dark:bg-zinc-800 dark:text-white"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              <span>Unread</span>
+              {unreadCount > 0 && (
+                <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-emerald-600 px-1 text-[9px] font-bold text-white">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("all")}
+              className={`flex-1 flex items-center justify-center py-1 text-xs font-semibold rounded-md transition-all ${
+                activeTab === "all"
+                  ? "bg-white text-zinc-900 shadow-xs dark:bg-zinc-800 dark:text-white"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              <span>All</span>
+              <span className="text-[10px] text-zinc-400 ml-1">
+                ({notifications.length})
+              </span>
+            </button>
+          </div>
+
+          {/* Notifications List */}
           <div className="max-h-80 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800/50">
-            {notifications.length === 0 ? (
-              <div className="py-8 text-center">
-                <span className="text-2xl block mb-2">🔔</span>
-                <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                  No notifications yet
+            {displayedNotifications.length === 0 ? (
+              <div className="py-8 text-center px-4">
+                <span className="text-2xl block mb-2">
+                  {activeTab === "unread" ? "🎉" : "🔔"}
+                </span>
+                <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  {activeTab === "unread"
+                    ? "You're all caught up!"
+                    : "No notifications yet"}
                 </p>
-                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                  We will notify you when you receive new messages or milestone updates.
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 max-w-xs mx-auto">
+                  {activeTab === "unread"
+                    ? "No unopened notifications. Switch to 'All' to review your past activity."
+                    : "We will notify you when you receive new messages, proposals, or milestone updates."}
                 </p>
               </div>
             ) : (
-              notifications.map((n) => {
+              displayedNotifications.map((n) => {
                 const content = (
                   <div
                     className={`flex items-start gap-3 p-3 rounded-xl transition-colors ${
@@ -238,7 +320,13 @@ export function NotificationBell() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-xs font-semibold truncate">{n.title}</p>
+                        <p
+                          className={`text-xs truncate ${
+                            !n.read ? "font-bold text-zinc-900 dark:text-white" : "font-medium"
+                          }`}
+                        >
+                          {n.title}
+                        </p>
                         <span className="text-[10px] text-zinc-400 whitespace-nowrap">
                           {formatTime(n.createdAt)}
                         </span>
@@ -248,7 +336,7 @@ export function NotificationBell() {
                       </p>
                     </div>
                     {!n.read && (
-                      <span className="mt-1 h-2 w-2 rounded-full bg-emerald-600 flex-shrink-0" />
+                      <span className="mt-1.5 h-2 w-2 rounded-full bg-emerald-600 flex-shrink-0" />
                     )}
                   </div>
                 );
@@ -257,7 +345,7 @@ export function NotificationBell() {
                   <Link
                     key={n.id}
                     href={n.link}
-                    onClick={() => handleItemClick(n)}
+                    onClick={(e) => handleItemClick(e, n)}
                     className="block focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 rounded-xl"
                   >
                     {content}
@@ -265,7 +353,7 @@ export function NotificationBell() {
                 ) : (
                   <div
                     key={n.id}
-                    onClick={() => handleItemClick(n)}
+                    onClick={(e) => handleItemClick(e, n)}
                     className="cursor-pointer"
                   >
                     {content}

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // scripts/run_integration_tests.js
 /**
  * Integration test runner.
@@ -60,10 +61,31 @@ function verifyDedicatedTestDatabase(rawUrl) {
   return { isTestDb: true };
 }
 
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// Safely inspect .env for default configuration if not passed via shell env
+if (!process.env.TEST_DATABASE_URL && !process.env.DATABASE_URL) {
+  const envPath = path.resolve(__dirname, '..', '.env');
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('TEST_DATABASE_URL=')) {
+        process.env.TEST_DATABASE_URL = trimmed.slice('TEST_DATABASE_URL='.length).trim().replace(/^["']|["']$/g, '');
+      } else if (trimmed.startsWith('DATABASE_URL=') && !process.env.DATABASE_URL) {
+        process.env.DATABASE_URL = trimmed.slice('DATABASE_URL='.length).trim().replace(/^["']|["']$/g, '');
+      }
+    }
+  }
+}
+
 const targetDbUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
 if (!targetDbUrl) {
   console.error('[Integration Tests] No database URL configured (neither TEST_DATABASE_URL nor DATABASE_URL is set). Aborting.');
+  console.error('[Integration Tests] Set TEST_DATABASE_URL to a dedicated test database (e.g., mongodb://localhost:27017/workpulse_test).');
   process.exit(1);
 }
 
@@ -72,9 +94,34 @@ const verification = verifyDedicatedTestDatabase(targetDbUrl);
 if (!verification.isTestDb) {
   console.error(`[Integration Tests] Refusing to run: ${verification.reason}`);
   console.error('[Integration Tests] Tests fail closed unless a dedicated local test database (e.g., mongodb://localhost:27017/workpulse_test) is positively identified.');
+  console.error('[Integration Tests] Set TEST_DATABASE_URL="mongodb://localhost:27017/workpulse_test" before running integration tests.');
   process.exit(1);
 }
 
 console.log('[Integration Tests] Dedicated test database positively identified. Running integration test suite...');
-// Placeholder: actual test runner invocation (e.g., Vitest or custom integration test suite)
-process.exit(0);
+
+const isWindows = process.platform === 'win32';
+const npxCmd = isWindows ? 'npx.cmd' : 'npx';
+
+const child = spawnSync(
+  npxCmd,
+  ['vitest', 'run', 'src/tests/integration'],
+  {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      DATABASE_URL: targetDbUrl,
+      TEST_DATABASE_URL: targetDbUrl,
+      WORKPULSE_INTEGRATION_RUN: 'true',
+    },
+    shell: true,
+  }
+);
+
+if (child.error) {
+  console.error('[Integration Tests] Failed to execute vitest process:', child.error.message);
+  process.exit(1);
+}
+
+process.exit(child.status !== null ? child.status : 1);
+

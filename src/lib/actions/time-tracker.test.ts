@@ -13,6 +13,7 @@ import {
   approveTimeEntriesAction,
   disputeTimeEntriesAction,
 } from "./time-tracker";
+import { resetActiveTimerLocks } from "@/lib/timer-mutex";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import {
@@ -26,6 +27,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     contract: {
       findUnique: vi.fn(),
+    },
+    user: {
+      update: vi.fn(),
     },
     timeEntry: {
       findFirst: vi.fn(),
@@ -58,6 +62,7 @@ describe("WorkPulse Time Tracker & Hourly Billing Server Actions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetActiveTimerLocks();
   });
 
   describe("startTimeTrackingAction - Authorization & Validation", () => {
@@ -1105,4 +1110,290 @@ describe("WorkPulse Time Tracker & Hourly Billing Server Actions", () => {
       });
     });
   });
+
+  describe("Task 2: Active Time-Tracking Concurrency & Overlap Protection", () => {
+    const contractId2 = "507f1f77bcf86cd799439099";
+
+    it("rejects two simultaneous start requests for the same freelancer", async () => {
+      vi.mocked(getCurrentUser).mockResolvedValue({
+        id: freelancerId,
+        role: "FREELANCER",
+      } as any);
+
+      vi.mocked(prisma.contract.findUnique).mockResolvedValue({
+        id: contractId,
+        type: PaymentType.HOURLY,
+        status: ContractStatus.ACTIVE,
+        hourlyRate: 50,
+        freelancerId,
+      } as any);
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (cb: any) => {
+        // Simulate in-flight transaction
+        await new Promise((r) => setTimeout(r, 10));
+        return cb({
+          user: { update: vi.fn() },
+          timeEntry: {
+            findFirst: vi.fn().mockResolvedValue(null),
+            create: vi.fn().mockResolvedValue({
+              id: "507f1f77bcf86cd799439025",
+              status: TimeTrackingStatus.RECORDING,
+            }),
+          },
+        });
+      });
+
+      // Launch two requests concurrently
+      const req1Promise = startTimeTrackingAction({ contractId });
+      const req2Promise = startTimeTrackingAction({ contractId });
+
+      const [res1, res2] = await Promise.all([req1Promise, req2Promise]);
+
+      // Exactly one succeeds and one is rejected
+      const successes = [res1, res2].filter((r) => r.success);
+      const failures = [res1, res2].filter((r) => !r.success);
+
+      expect(successes.length).toBe(1);
+      expect(failures.length).toBe(1);
+      expect(failures[0].error).toContain("already in progress");
+    });
+
+    it("rejects start request for a different contract when freelancer already has an active session lock", async () => {
+      vi.mocked(getCurrentUser).mockResolvedValue({
+        id: freelancerId,
+        role: "FREELANCER",
+      } as any);
+
+      (vi.mocked(prisma.contract.findUnique) as any).mockImplementation(async ({ where }: any) => {
+        return {
+          id: where.id,
+          type: PaymentType.HOURLY,
+          status: ContractStatus.ACTIVE,
+          hourlyRate: 60,
+          freelancerId,
+        } as any;
+      });
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (cb: any) => {
+        return cb({
+          user: { update: vi.fn() },
+          timeEntry: {
+            findFirst: vi.fn().mockResolvedValue(null),
+            create: vi.fn().mockResolvedValue({
+              id: "507f1f77bcf86cd799439025",
+              status: TimeTrackingStatus.RECORDING,
+            }),
+          },
+        });
+      });
+
+      // Start on contract 1
+      const res1 = await startTimeTrackingAction({ contractId });
+      expect(res1.success).toBe(true);
+
+      // Attempt start on contract 2 while lock is held
+      const res2 = await startTimeTrackingAction({ contractId: contractId2 });
+      expect(res2.success).toBe(false);
+      expect(res2.error).toContain("already in progress");
+    });
+
+    it("allows simultaneous start requests from two different freelancers", async () => {
+      (vi.mocked(prisma.contract.findUnique) as any).mockImplementation(async ({ where }: any) => {
+        return {
+          id: where.id,
+          type: PaymentType.HOURLY,
+          status: ContractStatus.ACTIVE,
+          hourlyRate: 60,
+          freelancerId: where.id === contractId ? freelancerId : otherFreelancerId,
+        } as any;
+      });
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (cb: any) => {
+        return cb({
+          user: { update: vi.fn() },
+          timeEntry: {
+            findFirst: vi.fn().mockResolvedValue(null),
+            create: vi.fn().mockResolvedValue({
+              id: "507f1f77bcf86cd799439025",
+              status: TimeTrackingStatus.RECORDING,
+            }),
+          },
+        });
+      });
+
+      // Freelancer 1
+      vi.mocked(getCurrentUser).mockResolvedValueOnce({
+        id: freelancerId,
+        role: "FREELANCER",
+      } as any);
+      const res1 = await startTimeTrackingAction({ contractId });
+      expect(res1.success).toBe(true);
+
+      // Freelancer 2
+      vi.mocked(getCurrentUser).mockResolvedValueOnce({
+        id: otherFreelancerId,
+        role: "FREELANCER",
+      } as any);
+      const res2 = await startTimeTrackingAction({ contractId: contractId2 });
+      expect(res2.success).toBe(true);
+    });
+
+    it("allows starting a new session after stopping a previous session", async () => {
+      vi.mocked(getCurrentUser).mockResolvedValue({
+        id: freelancerId,
+        role: "FREELANCER",
+      } as any);
+
+      vi.mocked(prisma.contract.findUnique).mockResolvedValue({
+        id: contractId,
+        type: PaymentType.HOURLY,
+        status: ContractStatus.ACTIVE,
+        hourlyRate: 50,
+        freelancerId,
+      } as any);
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (cb: any) => {
+        return cb({
+          user: { update: vi.fn() },
+          timeEntry: {
+            findFirst: vi.fn().mockResolvedValue(null),
+            create: vi.fn().mockResolvedValue({
+              id: timeEntryId,
+              status: TimeTrackingStatus.RECORDING,
+            }),
+          },
+        });
+      });
+
+      // 1. Start session
+      const startRes = await startTimeTrackingAction({ contractId });
+      expect(startRes.success).toBe(true);
+
+      // 2. Stop session
+      vi.mocked(prisma.timeEntry.findUnique).mockResolvedValue({
+        id: timeEntryId,
+        freelancerId,
+        contractId,
+        status: TimeTrackingStatus.RECORDING,
+        startTime: new Date(Date.now() - 3600000),
+        pausedAt: null,
+        totalPausedSeconds: 0,
+        hourlyRate: 50,
+      } as any);
+
+      vi.mocked(prisma.timeEntry.update).mockResolvedValue({
+        id: timeEntryId,
+        status: TimeTrackingStatus.STOPPED,
+        durationSeconds: 3600,
+        billableAmount: 50,
+      } as any);
+
+      const stopRes = await stopTimeTrackingAction({ timeEntryId });
+      expect(stopRes.success).toBe(true);
+
+      // 3. Start a new session now succeeds
+      const startRes2 = await startTimeTrackingAction({ contractId });
+      expect(startRes2.success).toBe(true);
+    });
+
+    it("prevents starting a new session while an existing session is PAUSED", async () => {
+      vi.mocked(getCurrentUser).mockResolvedValue({
+        id: freelancerId,
+        role: "FREELANCER",
+      } as any);
+
+      vi.mocked(prisma.contract.findUnique).mockResolvedValue({
+        id: contractId,
+        type: PaymentType.HOURLY,
+        status: ContractStatus.ACTIVE,
+        hourlyRate: 50,
+        freelancerId,
+      } as any);
+
+      // Clear in-memory lock to test DB active status check
+      resetActiveTimerLocks();
+
+      vi.mocked(prisma.$transaction).mockImplementation(async (cb: any) => {
+        return cb({
+          user: { update: vi.fn() },
+          timeEntry: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "507f1f77bcf86cd799439025",
+              contractId,
+              status: TimeTrackingStatus.PAUSED,
+            }),
+          },
+        });
+      });
+
+      const res = await startTimeTrackingAction({ contractId });
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("An active time session is already in progress");
+    });
+
+    it("safely releases the lock when session creation encounters an unexpected database error", async () => {
+      vi.mocked(getCurrentUser).mockResolvedValue({
+        id: freelancerId,
+        role: "FREELANCER",
+      } as any);
+
+      vi.mocked(prisma.contract.findUnique).mockResolvedValue({
+        id: contractId,
+        type: PaymentType.HOURLY,
+        status: ContractStatus.ACTIVE,
+        hourlyRate: 50,
+        freelancerId,
+      } as any);
+
+      // Fail inside transaction
+      vi.mocked(prisma.$transaction).mockRejectedValueOnce(new Error("Unexpected DB crash"));
+
+      const failedRes = await startTimeTrackingAction({ contractId });
+      expect(failedRes.success).toBe(false);
+      expect(failedRes.error).toContain("Failed to start time tracking session");
+
+      // Lock should have been released so freelancer is not permanently stuck
+      vi.mocked(prisma.$transaction).mockImplementationOnce(async (cb: any) => {
+        return cb({
+          user: { update: vi.fn() },
+          timeEntry: {
+            findFirst: vi.fn().mockResolvedValue(null),
+            create: vi.fn().mockResolvedValue({
+              id: timeEntryId,
+              status: TimeTrackingStatus.RECORDING,
+            }),
+          },
+        });
+      });
+
+      const recoveredRes = await startTimeTrackingAction({ contractId });
+      expect(recoveredRes.success).toBe(true);
+      expect(recoveredRes.timeEntryId).toBe(timeEntryId);
+    });
+
+    it("handles MongoDB P2034 WriteConflict gracefully", async () => {
+      vi.mocked(getCurrentUser).mockResolvedValue({
+        id: freelancerId,
+        role: "FREELANCER",
+      } as any);
+
+      vi.mocked(prisma.contract.findUnique).mockResolvedValue({
+        id: contractId,
+        type: PaymentType.HOURLY,
+        status: ContractStatus.ACTIVE,
+        hourlyRate: 50,
+        freelancerId,
+      } as any);
+
+      const writeConflictError = new Error("Write conflict in MongoDB transaction");
+      (writeConflictError as any).code = "P2034";
+
+      vi.mocked(prisma.$transaction).mockRejectedValueOnce(writeConflictError);
+
+      const res = await startTimeTrackingAction({ contractId });
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("already in progress");
+    });
+  });
 });
+
