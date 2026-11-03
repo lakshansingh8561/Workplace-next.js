@@ -86,4 +86,68 @@ export const SelectRoleSchema = z.object({
 
 export type SelectRoleInput = z.infer<typeof SelectRoleSchema>;
 
+export const PasswordValidation = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(100, "Password cannot exceed 100 characters")
+  .regex(/[a-zA-Z]/, "Password must contain at least one letter")
+  .regex(/[0-9]/, "Password must contain at least one number");
+
+export const ForgotPasswordSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Please provide a valid email address"),
+});
+
+export type ForgotPasswordInput = z.infer<typeof ForgotPasswordSchema>;
+
+export const ResetPasswordSchema = z
+  .object({
+    token: z.string().trim().min(1, "Reset token is required"),
+    password: PasswordValidation,
+    confirmPassword: z.string().min(1, "Please confirm your password"),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
+export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>;
+
+export const VerifyEmailSchema = z.object({
+  token: z.string().trim().min(1, "Verification token is required"),
+});
+
+export type VerifyEmailInput = z.infer<typeof VerifyEmailSchema>;
+
+export const ResendVerificationSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Please provide a valid email address"),
+});
+
+export type ResendVerificationInput = z.infer<typeof ResendVerificationSchema>;
+
+export const ChangePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: PasswordValidation,
+    confirmPassword: z.string().min(1, "Please confirm your new password"),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: "New passwords do not match",
+    path: ["confirmPassword"],
+  })
+  .refine((data) => data.currentPassword !== data.newPassword, {
+    message: "New password cannot be identical to your current password",
+    path: ["newPassword"],
+  });
+
+export type ChangePasswordInput = z.infer<typeof ChangePasswordSchema>;
+
 export { isSafeHttpUrl };
+

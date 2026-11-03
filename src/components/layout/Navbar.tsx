@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { logoutUser } from "@/lib/actions/auth";
 import { SessionUser } from "@/lib/session";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { Avatar } from "@/components/ui/Avatar";
 
 interface NavbarProps {
   user?: SessionUser | null;
@@ -55,11 +56,24 @@ function useActiveNav() {
     if (href === "/dashboard/freelancer/payments") {
       return pathname === "/dashboard/freelancer/payments";
     }
+    if (href.startsWith("/dashboard/freelancer/invitations")) {
+      return pathname.startsWith("/dashboard/freelancer/invitations");
+    }
     if (
       href === "/dashboard/freelancer/proposals" ||
       href === "/dashboard/freelancer"
     ) {
-      return pathname.startsWith("/dashboard/freelancer") && pathname !== "/dashboard/freelancer/payments";
+      return (
+        pathname.startsWith("/dashboard/freelancer") &&
+        pathname !== "/dashboard/freelancer/payments" &&
+        !pathname.startsWith("/dashboard/freelancer/invitations")
+      );
+    }
+    if (href.startsWith("/freelancers")) {
+      return pathname.startsWith("/freelancers");
+    }
+    if (href.startsWith("/clients")) {
+      return pathname.startsWith("/clients");
     }
     if (href.startsWith("/contracts")) {
       return pathname.startsWith("/contracts");
@@ -86,15 +100,11 @@ function DesktopNavList({
     <>
       {user.role === "CLIENT" ? (
         <>
-          <Link href="/dashboard/client" className={getLinkClass("/dashboard/client")}>
-            Dashboard
+          <Link href="/freelancers" className={getLinkClass("/freelancers")}>
+            Find Freelancers
           </Link>
-          <Link
-            href="/#categories"
-            onClick={() => onHashClick?.("#categories")}
-            className={getLinkClass("/#categories")}
-          >
-            Find Talent
+          <Link href="/dashboard/client" className={getLinkClass("/dashboard/client")}>
+            My Jobs
           </Link>
           <Link href="/contracts" className={getLinkClass("/contracts")}>
             Contracts
@@ -113,6 +123,15 @@ function DesktopNavList({
             className={getLinkClass("/dashboard/freelancer/proposals")}
           >
             My Proposals
+          </Link>
+          <Link
+            href="/dashboard/freelancer/invitations"
+            className={getLinkClass("/dashboard/freelancer/invitations")}
+          >
+            Invitations
+          </Link>
+          <Link href="/clients" className={getLinkClass("/clients")}>
+            Find Clients
           </Link>
           <Link href="/contracts" className={getLinkClass("/contracts")}>
             Contracts
@@ -214,64 +233,104 @@ function MobileNavList({
 }) {
   return user ? (
     <>
-      <Link
-        href={user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"}
-        onClick={closeMenu}
-        className={getLinkClass(
-          user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"
-        )}
-      >
-        {user.role === "CLIENT" ? "Dashboard" : "My Proposals"}
-      </Link>
-      <Link
-        href="/contracts"
-        onClick={closeMenu}
-        className={getLinkClass("/contracts")}
-      >
-        Contracts & Milestones
-      </Link>
-      <Link
-        href="/messages"
-        onClick={closeMenu}
-        className={getLinkClass("/messages")}
-      >
-        Messages
-      </Link>
-      <Link
-        href="/jobs"
-        onClick={closeMenu}
-        className={getLinkClass("/jobs")}
-      >
-        Find Work
-      </Link>
-      {user.role === "FREELANCER" && (
+      {user.role === "CLIENT" ? (
         <>
+          <Link
+            href="/freelancers"
+            onClick={closeMenu}
+            className={getLinkClass("/freelancers")}
+          >
+            Find Freelancers
+          </Link>
+          <Link
+            href="/dashboard/client"
+            onClick={closeMenu}
+            className={getLinkClass("/dashboard/client")}
+          >
+            My Jobs & Dashboard
+          </Link>
+          <Link
+            href="/contracts"
+            onClick={closeMenu}
+            className={getLinkClass("/contracts")}
+          >
+            Contracts
+          </Link>
+          <Link
+            href="/messages"
+            onClick={closeMenu}
+            className={getLinkClass("/messages")}
+          >
+            Messages
+          </Link>
+          <Link
+            href="/profile/client"
+            onClick={closeMenu}
+            className={getLinkClass("/profile/client")}
+          >
+            Company Profile
+          </Link>
+        </>
+      ) : (
+        <>
+          <Link
+            href="/jobs"
+            onClick={closeMenu}
+            className={getLinkClass("/jobs")}
+          >
+            Find Work
+          </Link>
+          <Link
+            href="/dashboard/freelancer/proposals"
+            onClick={closeMenu}
+            className={getLinkClass("/dashboard/freelancer/proposals")}
+          >
+            My Proposals
+          </Link>
+          <Link
+            href="/dashboard/freelancer/invitations"
+            onClick={closeMenu}
+            className={getLinkClass("/dashboard/freelancer/invitations")}
+          >
+            Invitations
+          </Link>
+          <Link
+            href="/clients"
+            onClick={closeMenu}
+            className={getLinkClass("/clients")}
+          >
+            Find Clients
+          </Link>
+          <Link
+            href="/contracts"
+            onClick={closeMenu}
+            className={getLinkClass("/contracts")}
+          >
+            Contracts
+          </Link>
+          <Link
+            href="/messages"
+            onClick={closeMenu}
+            className={getLinkClass("/messages")}
+          >
+            Messages
+          </Link>
           <Link
             href="/dashboard/freelancer/payments"
             onClick={closeMenu}
             className={getLinkClass("/dashboard/freelancer/payments")}
           >
-            Earnings & Payments
+            Earnings
           </Link>
           <Link
-            href="/jobs/saved"
+            href="/profile/freelancer"
             onClick={closeMenu}
-            className={getLinkClass("/jobs/saved")}
+            className={getLinkClass("/profile/freelancer")}
           >
-            Saved Jobs
+            Profile Settings
           </Link>
         </>
       )}
-      <Link
-        href="/#categories"
-        onClick={() => {
-          onHashClick?.("#categories");
-          closeMenu();
-        }}
-        className={getLinkClass("/#categories")}
-      >
-        Find Talent
-      </Link>
     </>
   ) : (
     <>
@@ -446,9 +505,13 @@ export function Navbar({ user }: NavbarProps) {
                 aria-expanded={isUserMenuOpen}
                 aria-label="User profile menu"
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white uppercase shrink-0">
-                  {user.name ? user.name.charAt(0) : user.email?.charAt(0) || "U"}
-                </span>
+                <Avatar
+                  src={user.image}
+                  name={user.name || user.email}
+                  role={user.role as "CLIENT" | "FREELANCER"}
+                  userId={user.id}
+                  size="xs"
+                />
                 <span className="max-w-[80px] sm:max-w-[100px] md:max-w-[130px] truncate">{user.name || user.email}</span>
                 <span className="hidden md:inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0">
                   {user.role === "CLIENT" ? "Client" : "Freelancer"}
@@ -474,13 +537,22 @@ export function Navbar({ user }: NavbarProps) {
                     {user.role === "CLIENT" ? (
                       <>
                         <Link
+                          href="/freelancers"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>🔍</span>
+                          <span>Find Freelancers</span>
+                        </Link>
+                        <Link
                           href="/dashboard/client"
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
                         >
                           <span>📊</span>
-                          <span>Client Dashboard</span>
+                          <span>My Jobs & Dashboard</span>
                         </Link>
                         <Link
                           href="/contracts"
@@ -522,6 +594,15 @@ export function Navbar({ user }: NavbarProps) {
                     ) : (
                       <>
                         <Link
+                          href="/jobs"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>💼</span>
+                          <span>Find Work</span>
+                        </Link>
+                        <Link
                           href="/dashboard/freelancer/proposals"
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
@@ -529,6 +610,42 @@ export function Navbar({ user }: NavbarProps) {
                         >
                           <span>📑</span>
                           <span>My Proposals</span>
+                        </Link>
+                        <Link
+                          href="/clients"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>🏢</span>
+                          <span>Find Clients</span>
+                        </Link>
+                        <Link
+                          href="/dashboard/freelancer/invitations"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>🤝</span>
+                          <span>Interview Invitations</span>
+                        </Link>
+                        <Link
+                          href="/messages"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>💬</span>
+                          <span>Messages</span>
+                        </Link>
+                        <Link
+                          href="/contracts"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>📄</span>
+                          <span>Contracts & Milestones</span>
                         </Link>
                         <Link
                           href="/dashboard/freelancer/payments"
@@ -565,6 +682,15 @@ export function Navbar({ user }: NavbarProps) {
                         >
                           <span>🌐</span>
                           <span>Public Profile</span>
+                        </Link>
+                        <Link
+                          href="/dashboard/freelancer/invitations"
+                          onClick={closeMenu}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                          role="menuitem"
+                        >
+                          <span>🤝</span>
+                          <span>Interview Invitations</span>
                         </Link>
                         <Link
                           href="/contracts"
@@ -706,9 +832,13 @@ export function Navbar({ user }: NavbarProps) {
             {user && (
               <div className="pb-3 border-b border-zinc-100 dark:border-zinc-800 px-1 flex items-center justify-between">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white uppercase shrink-0">
-                    {user.name ? user.name.charAt(0) : user.email?.charAt(0) || "U"}
-                  </span>
+                  <Avatar
+                    src={user.image}
+                    name={user.name || user.email}
+                    role={user.role as "CLIENT" | "FREELANCER"}
+                    userId={user.id}
+                    size="sm"
+                  />
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-zinc-900 dark:text-white truncate">
                       {user.name || user.email}

@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, verifyUserForAction } from "@/lib/session";
 import {
   ContractStatus,
   PaymentType,
@@ -23,7 +23,13 @@ import {
   DisputeTimeEntriesInput,
 } from "@/lib/validations/time-tracker";
 import { processScreenshotStorage, isStorageConfigured } from "@/lib/storage";
-import { acquireActiveTimerLock, releaseActiveTimerLock } from "@/lib/timer-mutex";
+import {
+  acquireActiveTimerLock,
+  releaseActiveTimerLock,
+  acquireDatabaseTimerReservation,
+  linkTimeEntryToReservation,
+  releaseDatabaseTimerReservation,
+} from "@/lib/timer-mutex";
 
 export type TimeTrackingActionResult = {
   success: boolean;
@@ -55,21 +61,17 @@ export type WorkSnapshotResult = {
 export async function startTimeTrackingAction(
   input: unknown
 ): Promise<TimeTrackingActionResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "FREELANCER",
+    "Unauthorized: Only freelancer accounts can track work time."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to track work time.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "FREELANCER") {
-    return {
-      success: false,
-      error: "Unauthorized: Only freelancer accounts can track work time.",
-    };
-  }
+  const user = authRes.user;
 
   const parsed = StartTimeTrackingSchema.safeParse(input);
   if (!parsed.success) {
@@ -139,38 +141,42 @@ export async function startTimeTrackingAction(
       };
     }
 
-    // 3. Multi-document transaction with User document touch for MongoDB write serialization
+    // 3. Multi-document transaction with User document touch and unique database reservation
     const newEntry = await prisma.$transaction(async (tx) => {
+      // Establish shared document write lock on the Contract record to coordinate with deletion and payment transactions
+      if (tx.contract?.update) {
+        await tx.contract.update({
+          where: { id: contract.id },
+          data: { updatedAt: new Date() },
+          select: { id: true, status: true },
+        });
+      }
+
       // Establish document write lock on the freelancer's User record
-      try {
+      // Genuine database errors (e.g. WriteConflict) must propagate to trigger concurrency handling
+      if (tx.user?.update) {
         await tx.user.update({
           where: { id: user.id },
           data: { updatedAt: new Date() },
           select: { id: true },
         });
-      } catch {
-        // Proceed if User.update mock is omitted in test environments
       }
 
-      const activeEntry = await tx.timeEntry.findFirst({
-        where: {
-          freelancerId: user.id,
-          status: { in: [TimeTrackingStatus.RECORDING, TimeTrackingStatus.PAUSED] },
-        },
-        select: {
-          id: true,
-          contractId: true,
-          status: true,
-        },
-      });
+      // Reconcile and atomically acquire database-level reservation with unique constraint on freelancerId
+      const reservationRes = await acquireDatabaseTimerReservation(
+        tx,
+        user.id,
+        contract.id
+      );
 
-      if (activeEntry) {
+      if (!reservationRes.success) {
         throw new Error(
-          "An active time session is already in progress. Please pause or stop your current session before starting a new one."
+          reservationRes.error ||
+            "An active time session is already in progress. Please pause or stop your current session before starting a new one."
         );
       }
 
-      return tx.timeEntry.create({
+      const createdEntry = await tx.timeEntry.create({
         data: {
           contractId: contract.id,
           freelancerId: user.id,
@@ -186,6 +192,10 @@ export async function startTimeTrackingAction(
           status: true,
         },
       });
+
+      await linkTimeEntryToReservation(tx, user.id, createdEntry.id);
+
+      return createdEntry;
     });
 
     revalidatePath(`/contracts/${contractId}`);
@@ -198,10 +208,13 @@ export async function startTimeTrackingAction(
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "";
+    const errorCode = (error as { code?: string })?.code;
     const isConflict =
       errorMsg.includes("already in progress") ||
-      (error as { code?: string })?.code === "P2034" ||
-      errorMsg.includes("WriteConflict");
+      errorCode === "P2034" ||
+      errorCode === "P2002" ||
+      errorMsg.includes("WriteConflict") ||
+      errorMsg.includes("E11000");
 
     if (isConflict) {
       return {
@@ -213,6 +226,11 @@ export async function startTimeTrackingAction(
 
     // Release lock on unexpected failure so freelancer is not blocked
     releaseActiveTimerLock(user.id);
+    try {
+      await releaseDatabaseTimerReservation(prisma, user.id);
+    } catch {
+      // Best-effort cleanup
+    }
 
     console.error(
       "[WorkPulse Start Time Tracking Error]:",
@@ -539,6 +557,11 @@ export async function stopTimeTrackingAction(
     revalidatePath("/dashboard/client");
 
     releaseActiveTimerLock(user.id);
+    try {
+      await releaseDatabaseTimerReservation(prisma, user.id);
+    } catch {
+      // Best effort cleanup
+    }
 
     return {
       success: true,
@@ -1044,10 +1067,11 @@ export async function submitTimeEntriesAction(input: SubmitTimeEntriesInput) {
   }
 
   const { contractId, timeEntryIds } = parseResult.data;
-  const user = await getCurrentUser();
-  if (!user) {
-    return { success: false, error: "Authentication required to submit time entries." };
+  const authRes = await verifyUserForAction("FREELANCER");
+  if (!authRes.success) {
+    return { success: false, error: authRes.error };
   }
+  const user = authRes.user;
 
   try {
     const contract = await prisma.contract.findUnique({
@@ -1158,10 +1182,11 @@ export async function approveTimeEntriesAction(input: ApproveTimeEntriesInput) {
   }
 
   const { contractId, timeEntryIds } = parseResult.data;
-  const user = await getCurrentUser();
-  if (!user) {
-    return { success: false, error: "Authentication required to approve timesheets." };
+  const authRes = await verifyUserForAction();
+  if (!authRes.success) {
+    return { success: false, error: authRes.error };
   }
+  const user = authRes.user;
 
   try {
     const contract = await prisma.contract.findUnique({
@@ -1279,10 +1304,11 @@ export async function disputeTimeEntriesAction(input: DisputeTimeEntriesInput) {
   }
 
   const { contractId, timeEntryIds, reason } = parseResult.data;
-  const user = await getCurrentUser();
-  if (!user) {
-    return { success: false, error: "Authentication required to dispute timesheets." };
+  const authRes = await verifyUserForAction();
+  if (!authRes.success) {
+    return { success: false, error: authRes.error };
   }
+  const user = authRes.user;
 
   try {
     const contract = await prisma.contract.findUnique({

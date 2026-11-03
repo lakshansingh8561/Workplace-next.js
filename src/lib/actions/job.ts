@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
+import { verifyUserForAction } from "@/lib/session";
 import { CreateJobSchema } from "@/lib/validations/job";
 import { PaymentType, ExperienceLevel, JobStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
@@ -18,26 +18,23 @@ export type CreateJobResult = {
  * Server Action to create a new job contract.
  * Strictly enforces that:
  * 1. The caller is authenticated.
- * 2. The caller's role is CLIENT (rejects FREELANCER and unauthenticated callers).
- * 3. The payload passes full Zod validation.
- * 4. Job ownership (clientId) is derived exclusively from the trusted server-side session.
+ * 2. The caller has a verified email address.
+ * 3. The caller's role is CLIENT (rejects FREELANCER and unauthenticated callers).
+ * 4. The payload passes full Zod validation.
+ * 5. Job ownership (clientId) is derived exclusively from the trusted server-side session.
  */
 export async function createJobAction(input: unknown): Promise<CreateJobResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only client accounts can post freelance jobs."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to post a job.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "CLIENT") {
-    return {
-      success: false,
-      error: "Unauthorized: Only client accounts can post freelance jobs.",
-    };
-  }
+  const user = authRes.user;
 
   const result = CreateJobSchema.safeParse(input);
 
@@ -143,21 +140,17 @@ export type UpdateJobStatusResult = {
 export async function updateJobStatusAction(
   input: unknown
 ): Promise<UpdateJobStatusResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only client accounts can manage job status."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to manage job postings.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "CLIENT") {
-    return {
-      success: false,
-      error: "Unauthorized: Only client accounts can manage job status.",
-    };
-  }
+  const user = authRes.user;
 
   const { UpdateJobStatusSchema } = await import("@/lib/validations/job");
   const result = UpdateJobStatusSchema.safeParse(input);

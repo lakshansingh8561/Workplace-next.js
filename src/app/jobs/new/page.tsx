@@ -1,8 +1,8 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { connection } from "next/server";
-import { getCurrentUser } from "@/lib/session";
-import { redirect } from "next/navigation";
+import { requireVerifiedUser } from "@/lib/session";
+import { Role } from "@/types";
 import { PostJobForm } from "@/components/jobs/PostJobForm";
 
 export const metadata: Metadata = {
@@ -12,15 +12,7 @@ export const metadata: Metadata = {
 
 async function NewJobContent() {
   await connection();
-  const user = await getCurrentUser();
-
-  if (!user) {
-    redirect("/login?redirectTo=/jobs/new");
-  }
-
-  if (user.role !== "CLIENT") {
-    redirect("/jobs?error=unauthorized_client_only");
-  }
+  const user = await requireVerifiedUser(Role.CLIENT, "/jobs/new");
 
   return <PostJobForm userName={user.name || user.email} />;
 }

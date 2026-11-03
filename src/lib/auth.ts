@@ -107,6 +107,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             role: user.role,
             image: user.image,
             roleSelected: user.roleSelected,
+            sessionVersion: user.sessionVersion ?? 1,
+            emailVerified: user.emailVerified,
           };
         } catch (error) {
           console.error(
@@ -166,33 +168,58 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user }) {
       if (user) {
-        const u = user as unknown as { role?: Role; roleSelected?: boolean };
+        const u = user as unknown as {
+          role?: Role;
+          roleSelected?: boolean;
+          sessionVersion?: number;
+          emailVerified?: Date | null;
+        };
         token.id = user.id;
         token.role = u.role;
         token.roleSelected = u.roleSelected;
+        token.sessionVersion = u.sessionVersion ?? 1;
+        token.emailVerified = u.emailVerified;
       }
 
-      // Check for updated role onboarding if roleSelected was false or trigger is update
-      if (token.id && (token.roleSelected === false || trigger === "update")) {
+      // Enforce live database session invalidation & latest state
+      if (token.id) {
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id as string },
-          select: { role: true, roleSelected: true },
+          select: {
+            role: true,
+            roleSelected: true,
+            sessionVersion: true,
+            emailVerified: true,
+          },
         });
-        if (dbUser) {
-          token.role = dbUser.role;
-          token.roleSelected = dbUser.roleSelected;
+
+        // Invalidate JWT session if user was deleted or sessionVersion was incremented (e.g., password reset/change)
+        if (!dbUser || (dbUser.sessionVersion ?? 1) !== (token.sessionVersion ?? 1)) {
+          return null as unknown as typeof token;
         }
+
+        token.role = dbUser.role;
+        token.roleSelected = dbUser.roleSelected;
+        token.sessionVersion = dbUser.sessionVersion ?? 1;
+        token.emailVerified = dbUser.emailVerified;
       }
 
       return token;
     },
     async session({ session, token }) {
-      if (token && session.user) {
-        if (token.id) session.user.id = token.id as string;
+      if (!token || !token.id) {
+        return null as unknown as typeof session;
+      }
+      if (session.user) {
+        session.user.id = token.id as string;
         if (token.role) session.user.role = token.role as Role;
         session.user.roleSelected = token.roleSelected !== false;
+        session.user.sessionVersion =
+          typeof token.sessionVersion === "number" ? token.sessionVersion : 1;
+        session.user.emailVerified =
+          (token.emailVerified as Date | null) ?? null;
       }
       return session;
     },

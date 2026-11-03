@@ -9,6 +9,7 @@ import {
   ClientProfileForm,
   ClientProfileInitialData,
 } from "@/components/profile/ClientProfileForm";
+import { ChangePasswordSection } from "@/components/profile/ChangePasswordSection";
 import { getUserReviewsSummary } from "@/lib/actions/review";
 import { PublicReviewsList } from "@/components/reviews/PublicReviewsList";
 
@@ -56,7 +57,8 @@ async function ClientProfileContent() {
   return (
     <div className="space-y-10">
       <ClientProfileForm initialData={initialData} />
-      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 pb-16">
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 pb-16 space-y-10">
+        <ChangePasswordSection />
         <PublicReviewsList
           reviews={reviewsSummary.reviews}
           averageRating={reviewsSummary.averageRating}

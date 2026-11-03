@@ -12,6 +12,8 @@ export function LoginForm() {
   const searchParams = useSearchParams();
 
   const isRegistered = searchParams.get("registered") === "true";
+  const isResetSuccess = searchParams.get("reset") === "success";
+  const isVerifiedSuccess = searchParams.get("verified") === "true";
   const urlError = searchParams.get("error");
   const redirectTo = sanitizeRedirectPath(searchParams.get("redirectTo"));
 
@@ -95,7 +97,25 @@ export function LoginForm() {
             role="status"
             className="mb-6 rounded-xl bg-emerald-50 p-3.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50"
           >
-            ✓ Account created successfully! Please sign in with your credentials.
+            ✓ Account created successfully! Please check your email to verify your account.
+          </div>
+        )}
+
+        {isResetSuccess && (
+          <div
+            role="status"
+            className="mb-6 rounded-xl bg-emerald-50 p-3.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50"
+          >
+            ✓ Your password was reset successfully. Please sign in with your new password.
+          </div>
+        )}
+
+        {isVerifiedSuccess && (
+          <div
+            role="status"
+            className="mb-6 rounded-xl bg-emerald-50 p-3.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50"
+          >
+            ✓ Your email address was verified successfully! Please sign in.
           </div>
         )}
 
@@ -157,6 +177,12 @@ export function LoginForm() {
               >
                 Password
               </label>
+              <Link
+                href="/forgot-password"
+                className="text-[11px] font-medium text-emerald-600 hover:text-emerald-500 dark:text-emerald-400"
+              >
+                Forgot password?
+              </Link>
             </div>
             <div className="relative">
               <input

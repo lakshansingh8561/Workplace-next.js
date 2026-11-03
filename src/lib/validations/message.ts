@@ -22,9 +22,36 @@ export const GetMessagesSchema = z.object({
     .trim()
     .regex(OBJECT_ID_REGEX, "Invalid Conversation ID. Expected a 24-character hexadecimal ObjectId"),
   limit: z.coerce.number().min(1).max(100).default(50).optional(),
+  cursor: z
+    .string()
+    .trim()
+    .regex(OBJECT_ID_REGEX, "Invalid cursor format. Expected a 24-character hexadecimal ObjectId")
+    .optional(),
+  direction: z.enum(["before", "after"]).default("before").optional(),
 });
 
 export type GetMessagesInput = z.infer<typeof GetMessagesSchema>;
+
+export const GetConversationsSchema = z.object({
+  limit: z.coerce.number().min(1).max(100).default(50).optional(),
+  cursor: z
+    .string()
+    .trim()
+    .regex(OBJECT_ID_REGEX, "Invalid cursor format. Expected a 24-character hexadecimal ObjectId")
+    .optional(),
+  page: z.coerce.number().min(1).optional(),
+});
+
+export type GetConversationsInput = z.infer<typeof GetConversationsSchema>;
+
+export const MarkConversationReadSchema = z.object({
+  conversationId: z
+    .string()
+    .trim()
+    .regex(OBJECT_ID_REGEX, "Invalid Conversation ID. Expected a 24-character hexadecimal ObjectId"),
+});
+
+export type MarkConversationReadInput = z.infer<typeof MarkConversationReadSchema>;
 
 export const MarkNotificationSchema = z.object({
   notificationId: z

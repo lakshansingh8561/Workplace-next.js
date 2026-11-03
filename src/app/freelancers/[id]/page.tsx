@@ -49,11 +49,23 @@ async function FreelancerProfileContent({ params }: FreelancerProfilePageProps) 
 
   const isOwner = currentUser?.id === profile.id;
 
+  let clientJobs: { id: string; title: string }[] = [];
+  if (currentUser?.role === "CLIENT") {
+    const { prisma } = await import("@/lib/prisma");
+    clientJobs = await prisma.job.findMany({
+      where: { clientId: currentUser.id, status: "OPEN" },
+      select: { id: true, title: true },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
   return (
     <PublicFreelancerProfileView
       profile={profile}
       reviewsSummary={reviewsSummary}
       isOwner={isOwner}
+      currentUserRole={currentUser?.role}
+      clientJobs={clientJobs}
     />
   );
 }

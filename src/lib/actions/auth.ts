@@ -1,5 +1,6 @@
 "use server";
 
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
@@ -16,6 +17,7 @@ import {
   sanitizeRedirectPath,
 } from "@/lib/validations/auth";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { sendVerificationEmail, getAppBaseUrl } from "@/lib/email";
 
 export type AuthActionResult = {
   success: boolean;
@@ -77,7 +79,7 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    await prisma.user.create({
+    const newUser = await prisma.user.create({
       data: {
         name,
         email,
@@ -88,14 +90,47 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
       select: {
         id: true,
         email: true,
+        name: true,
         role: true,
         createdAt: true,
       },
     });
 
+    // Generate secure email verification token (24-hour expiration)
+    try {
+      const rawVerificationToken = crypto.randomBytes(32).toString("hex");
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(rawVerificationToken)
+        .digest("hex");
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await prisma.emailVerificationToken.create({
+        data: {
+          email: newUser.email,
+          tokenHash,
+          expiresAt,
+        },
+      });
+
+      const verifyUrl = `${getAppBaseUrl()}/verify-email?token=${rawVerificationToken}`;
+      await sendVerificationEmail({
+        to: newUser.email,
+        verifyUrl,
+        recipientName: newUser.name,
+      });
+    } catch (emailErr) {
+      // Do not fail account registration if email queueing encounters non-fatal error
+      console.error(
+        "[WorkPulse Verification Email Error]:",
+        emailErr instanceof Error ? emailErr.message : "Failed to queue verification email"
+      );
+    }
+
     return {
       success: true,
-      message: "Account created successfully. You can now log in.",
+      message:
+        "Account created successfully. A verification link has been sent to your email.",
     };
   } catch (error) {
     if (

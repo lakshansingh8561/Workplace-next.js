@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, verifyUserForAction } from "@/lib/session";
 import {
   ReviewSubmissionSchema,
   ReviewUpdateSchema,
@@ -57,14 +57,15 @@ export type ReviewActionResult<T = unknown> = {
 export async function submitReviewAction(
   input: unknown
 ): Promise<ReviewActionResult> {
-  const sessionUser = await getCurrentUser();
+  const authRes = await verifyUserForAction(["CLIENT", "FREELANCER"]);
 
-  if (!sessionUser) {
+  if (!authRes.success) {
     return {
       success: false,
-      error: "Authentication required to submit a review.",
+      error: authRes.error,
     };
   }
+  const sessionUser = authRes.user;
 
   const parsed = ReviewSubmissionSchema.safeParse(input);
   if (!parsed.success) {

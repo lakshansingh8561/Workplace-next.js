@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
+import { verifyUserForAction } from "@/lib/session";
 import {
   CreateMilestoneSchema,
   MilestoneActionSchema,
@@ -9,7 +9,14 @@ import {
   DeleteContractSchema,
 } from "@/lib/validations/contract";
 import { revalidatePath } from "next/cache";
-import { ContractStatus, MilestoneStatus, NotificationType } from "@prisma/client";
+import {
+  Prisma,
+  ContractStatus,
+  MilestoneStatus,
+  NotificationType,
+  JobStatus,
+  ProposalStatus,
+} from "@prisma/client";
 import { createNotificationSafe } from "@/lib/actions/notification";
 
 export type MilestoneActionResult = {
@@ -37,21 +44,17 @@ export type ContractStatusActionResult = {
 export async function createMilestoneAction(
   input: unknown
 ): Promise<MilestoneActionResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only client accounts can create contract milestones."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to manage contract milestones.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "CLIENT") {
-    return {
-      success: false,
-      error: "Unauthorized: Only client accounts can create contract milestones.",
-    };
-  }
+  const user = authRes.user;
 
   const result = CreateMilestoneSchema.safeParse(input);
 
@@ -127,15 +130,26 @@ export async function createMilestoneAction(
       }
     }
 
-    const milestone = await prisma.contractMilestone.create({
-      data: {
-        contractId: contract.id,
-        title,
-        description: description || null,
-        amount,
-        dueDate: dueDate ? new Date(dueDate) : null,
-        status: MilestoneStatus.ACTIVE, // Created as active milestone ready for work
-      },
+    const milestone = await prisma.$transaction(async (tx) => {
+      // Coordinate through shared Contract document write lock
+      if (tx.contract?.update) {
+        await tx.contract.update({
+          where: { id: contract.id },
+          data: { updatedAt: new Date() },
+          select: { id: true },
+        });
+      }
+
+      return tx.contractMilestone.create({
+        data: {
+          contractId: contract.id,
+          title,
+          description: description || null,
+          amount,
+          dueDate: dueDate ? new Date(dueDate) : null,
+          status: MilestoneStatus.ACTIVE, // Created as active milestone ready for work
+        },
+      });
     });
 
     revalidatePath("/contracts");
@@ -171,21 +185,17 @@ export async function createMilestoneAction(
 export async function submitMilestoneAction(
   input: unknown
 ): Promise<MilestoneActionResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "FREELANCER",
+    "Unauthorized: Only freelancer accounts can submit milestone deliverables."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to submit milestone work.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "FREELANCER") {
-    return {
-      success: false,
-      error: "Unauthorized: Only freelancer accounts can submit milestone deliverables.",
-    };
-  }
+  const user = authRes.user;
 
   const result = MilestoneActionSchema.safeParse(input);
 
@@ -234,6 +244,31 @@ export async function submitMilestoneAction(
       };
     }
 
+    if (milestone.status === MilestoneStatus.SUBMITTED) {
+      // Milestone is already submitted. Recover notification if missing from a previous failed dispatch.
+      const expectedKey = `milestone:${milestone.id}:submitted:v${milestone.lifecycleVersion}`;
+      const existingNotif = await prisma.notification.findFirst({
+        where: { idempotencyKey: expectedKey },
+        select: { id: true },
+      });
+
+      if (!existingNotif) {
+        await createNotificationSafe({
+          userId: milestone.contract.clientId,
+          type: NotificationType.MILESTONE_SUBMITTED,
+          title: "Milestone Deliverable Submitted",
+          message: `A milestone ("${milestone.title}") was submitted for your review.`,
+          link: `/contracts/${milestone.contract.id}`,
+          idempotencyKey: expectedKey,
+        });
+      }
+
+      return {
+        success: true,
+        milestoneId: milestone.id,
+      };
+    }
+
     if (milestone.status !== MilestoneStatus.ACTIVE) {
       return {
         success: false,
@@ -241,10 +276,84 @@ export async function submitMilestoneAction(
       };
     }
 
-    const updated = await prisma.contractMilestone.update({
-      where: { id: milestoneId },
-      data: { status: MilestoneStatus.SUBMITTED },
+    const txResult = await prisma.$transaction(async (tx) => {
+      // Shared write lock on parent contract to serialize against concurrent contract operations
+      await tx.contract.update({
+        where: { id: milestone.contract.id },
+        data: { updatedAt: new Date() },
+      });
+
+      // Re-read milestone inside transaction immediately before updating
+      const freshMilestone = await tx.contractMilestone.findUnique({
+        where: { id: milestoneId },
+        select: {
+          id: true,
+          status: true,
+          lifecycleVersion: true,
+        },
+      });
+
+      if (!freshMilestone) {
+        throw new Error("MILESTONE_NOT_FOUND");
+      }
+
+      if (freshMilestone.status !== MilestoneStatus.ACTIVE) {
+        return {
+          transitioned: false,
+          milestone: freshMilestone,
+        };
+      }
+
+      const updated = await tx.contractMilestone.update({
+        where: { id: milestoneId },
+        data: {
+          status: MilestoneStatus.SUBMITTED,
+          lifecycleVersion: { increment: 1 },
+        },
+        select: {
+          id: true,
+          status: true,
+          lifecycleVersion: true,
+        },
+      });
+
+      return {
+        transitioned: true,
+        milestone: updated,
+      };
     });
+
+    if (!txResult.transitioned) {
+      // Another concurrent request completed the transition first
+      if (txResult.milestone.status === MilestoneStatus.SUBMITTED) {
+        const expectedKey = `milestone:${txResult.milestone.id}:submitted:v${txResult.milestone.lifecycleVersion}`;
+        const existingNotif = await prisma.notification.findFirst({
+          where: { idempotencyKey: expectedKey },
+          select: { id: true },
+        });
+
+        if (!existingNotif) {
+          await createNotificationSafe({
+            userId: milestone.contract.clientId,
+            type: NotificationType.MILESTONE_SUBMITTED,
+            title: "Milestone Deliverable Submitted",
+            message: `A milestone ("${milestone.title}") was submitted for your review.`,
+            link: `/contracts/${milestone.contract.id}`,
+            idempotencyKey: expectedKey,
+          });
+        }
+
+        return {
+          success: true,
+          milestoneId: txResult.milestone.id,
+        };
+      }
+
+      return {
+        success: false,
+        error: `Cannot submit work. Milestone is currently ${txResult.milestone.status.toLowerCase()}.`,
+      };
+    }
 
     revalidatePath("/contracts");
     revalidatePath(`/contracts/${milestone.contract.id}`);
@@ -257,13 +366,70 @@ export async function submitMilestoneAction(
       title: "Milestone Deliverable Submitted",
       message: `A milestone ("${milestone.title}") was submitted for your review.`,
       link: `/contracts/${milestone.contract.id}`,
+      idempotencyKey: `milestone:${txResult.milestone.id}:submitted:v${txResult.milestone.lifecycleVersion}`,
     });
 
     return {
       success: true,
-      milestoneId: updated.id,
+      milestoneId: txResult.milestone.id,
     };
   } catch (error) {
+    const isWriteConflict =
+      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") ||
+      /write\s*conflict|deadlock|transienttransactionerror/i.test(
+        error instanceof Error ? error.message : ""
+      );
+
+    if (isWriteConflict) {
+      try {
+        // Allow the winning concurrent transaction up to 250ms to complete its commit
+        for (let attempt = 0; attempt < 5; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const fresh = await prisma.contractMilestone.findUnique({
+            where: { id: milestoneId },
+            select: {
+              id: true,
+              status: true,
+              lifecycleVersion: true,
+              title: true,
+              contract: {
+                select: {
+                  id: true,
+                  clientId: true,
+                },
+              },
+            },
+          });
+
+          if (fresh && fresh.status === MilestoneStatus.SUBMITTED) {
+            const expectedKey = `milestone:${fresh.id}:submitted:v${fresh.lifecycleVersion}`;
+            const existingNotif = await prisma.notification.findFirst({
+              where: { idempotencyKey: expectedKey },
+              select: { id: true },
+            });
+
+            if (!existingNotif) {
+              await createNotificationSafe({
+                userId: fresh.contract.clientId,
+                type: NotificationType.MILESTONE_SUBMITTED,
+                title: "Milestone Deliverable Submitted",
+                message: `A milestone ("${fresh.title}") was submitted for your review.`,
+                link: `/contracts/${fresh.contract.id}`,
+                idempotencyKey: expectedKey,
+              });
+            }
+
+            return {
+              success: true,
+              milestoneId: fresh.id,
+            };
+          }
+        }
+      } catch {
+        // Fall through to generic error
+      }
+    }
+
     console.error(
       "[WorkPulse Submit Milestone Error]:",
       error instanceof Error ? error.message : "Database error"
@@ -289,21 +455,17 @@ export async function submitMilestoneAction(
 export async function approveMilestoneAction(
   input: unknown
 ): Promise<MilestoneActionResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only client accounts can approve milestone deliverables."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to approve milestones.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "CLIENT") {
-    return {
-      success: false,
-      error: "Unauthorized: Only client accounts can approve milestone deliverables.",
-    };
-  }
+  const user = authRes.user;
 
   const result = MilestoneActionSchema.safeParse(input);
 
@@ -352,6 +514,31 @@ export async function approveMilestoneAction(
       };
     }
 
+    if (milestone.status === MilestoneStatus.APPROVED) {
+      // Milestone is already approved. Recover notification if missing from a previous failed dispatch.
+      const expectedKey = `milestone:${milestone.id}:approved:v${milestone.lifecycleVersion}`;
+      const existingNotif = await prisma.notification.findFirst({
+        where: { idempotencyKey: expectedKey },
+        select: { id: true },
+      });
+
+      if (!existingNotif) {
+        await createNotificationSafe({
+          userId: milestone.contract.freelancerId,
+          type: NotificationType.MILESTONE_APPROVED,
+          title: "Milestone Approved!",
+          message: `Your milestone ("${milestone.title}") was approved by the client.`,
+          link: `/contracts/${milestone.contract.id}`,
+          idempotencyKey: expectedKey,
+        });
+      }
+
+      return {
+        success: true,
+        milestoneId: milestone.id,
+      };
+    }
+
     if (milestone.status !== MilestoneStatus.SUBMITTED) {
       return {
         success: false,
@@ -359,10 +546,84 @@ export async function approveMilestoneAction(
       };
     }
 
-    const updated = await prisma.contractMilestone.update({
-      where: { id: milestoneId },
-      data: { status: MilestoneStatus.APPROVED },
+    const txResult = await prisma.$transaction(async (tx) => {
+      // Shared write lock on parent contract to serialize against concurrent contract operations
+      await tx.contract.update({
+        where: { id: milestone.contract.id },
+        data: { updatedAt: new Date() },
+      });
+
+      // Re-read milestone inside transaction immediately before updating
+      const freshMilestone = await tx.contractMilestone.findUnique({
+        where: { id: milestoneId },
+        select: {
+          id: true,
+          status: true,
+          lifecycleVersion: true,
+        },
+      });
+
+      if (!freshMilestone) {
+        throw new Error("MILESTONE_NOT_FOUND");
+      }
+
+      if (freshMilestone.status !== MilestoneStatus.SUBMITTED) {
+        return {
+          transitioned: false,
+          milestone: freshMilestone,
+        };
+      }
+
+      const updated = await tx.contractMilestone.update({
+        where: { id: milestoneId },
+        data: {
+          status: MilestoneStatus.APPROVED,
+          lifecycleVersion: { increment: 1 },
+        },
+        select: {
+          id: true,
+          status: true,
+          lifecycleVersion: true,
+        },
+      });
+
+      return {
+        transitioned: true,
+        milestone: updated,
+      };
     });
+
+    if (!txResult.transitioned) {
+      // Another concurrent request completed the transition first
+      if (txResult.milestone.status === MilestoneStatus.APPROVED) {
+        const expectedKey = `milestone:${txResult.milestone.id}:approved:v${txResult.milestone.lifecycleVersion}`;
+        const existingNotif = await prisma.notification.findFirst({
+          where: { idempotencyKey: expectedKey },
+          select: { id: true },
+        });
+
+        if (!existingNotif) {
+          await createNotificationSafe({
+            userId: milestone.contract.freelancerId,
+            type: NotificationType.MILESTONE_APPROVED,
+            title: "Milestone Approved!",
+            message: `Your milestone ("${milestone.title}") was approved by the client.`,
+            link: `/contracts/${milestone.contract.id}`,
+            idempotencyKey: expectedKey,
+          });
+        }
+
+        return {
+          success: true,
+          milestoneId: txResult.milestone.id,
+        };
+      }
+
+      return {
+        success: false,
+        error: `Cannot approve milestone. It is currently ${txResult.milestone.status.toLowerCase()}, not submitted for review.`,
+      };
+    }
 
     revalidatePath("/contracts");
     revalidatePath(`/contracts/${milestone.contract.id}`);
@@ -375,13 +636,70 @@ export async function approveMilestoneAction(
       title: "Milestone Approved!",
       message: `Your milestone ("${milestone.title}") was approved by the client.`,
       link: `/contracts/${milestone.contract.id}`,
+      idempotencyKey: `milestone:${txResult.milestone.id}:approved:v${txResult.milestone.lifecycleVersion}`,
     });
 
     return {
       success: true,
-      milestoneId: updated.id,
+      milestoneId: txResult.milestone.id,
     };
   } catch (error) {
+    const isWriteConflict =
+      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") ||
+      /write\s*conflict|deadlock|transienttransactionerror/i.test(
+        error instanceof Error ? error.message : ""
+      );
+
+    if (isWriteConflict) {
+      try {
+        // Allow the winning concurrent transaction up to 250ms to complete its commit
+        for (let attempt = 0; attempt < 5; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const fresh = await prisma.contractMilestone.findUnique({
+            where: { id: milestoneId },
+            select: {
+              id: true,
+              status: true,
+              lifecycleVersion: true,
+              title: true,
+              contract: {
+                select: {
+                  id: true,
+                  freelancerId: true,
+                },
+              },
+            },
+          });
+
+          if (fresh && fresh.status === MilestoneStatus.APPROVED) {
+            const expectedKey = `milestone:${fresh.id}:approved:v${fresh.lifecycleVersion}`;
+            const existingNotif = await prisma.notification.findFirst({
+              where: { idempotencyKey: expectedKey },
+              select: { id: true },
+            });
+
+            if (!existingNotif) {
+              await createNotificationSafe({
+                userId: fresh.contract.freelancerId,
+                type: NotificationType.MILESTONE_APPROVED,
+                title: "Milestone Approved!",
+                message: `Your milestone ("${fresh.title}") was approved by the client.`,
+                link: `/contracts/${fresh.contract.id}`,
+                idempotencyKey: expectedKey,
+              });
+            }
+
+            return {
+              success: true,
+              milestoneId: fresh.id,
+            };
+          }
+        }
+      } catch {
+        // Fall through to generic error
+      }
+    }
+
     console.error(
       "[WorkPulse Approve Milestone Error]:",
       error instanceof Error ? error.message : "Database error"
@@ -400,21 +718,17 @@ export async function approveMilestoneAction(
 export async function updateContractStatusAction(
   input: unknown
 ): Promise<ContractStatusActionResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only client accounts can manage contract status."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to manage contract status.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "CLIENT") {
-    return {
-      success: false,
-      error: "Unauthorized: Only client accounts can manage contract status.",
-    };
-  }
+  const user = authRes.user;
 
   const result = UpdateContractStatusSchema.safeParse(input);
 
@@ -436,6 +750,7 @@ export async function updateContractStatusAction(
         freelancerId: true,
         title: true,
         status: true,
+        lifecycleVersion: true,
       },
     });
 
@@ -454,6 +769,25 @@ export async function updateContractStatusAction(
     }
 
     if (contract.status === targetStatus) {
+      // Contract is already at target status. This is a retry or concurrent call.
+      // Recover notification if missing from a previous failed dispatch:
+      const expectedKey = `contract:${contract.id}:status:${targetStatus}:v${contract.lifecycleVersion}`;
+      const existingNotif = await prisma.notification.findFirst({
+        where: { idempotencyKey: expectedKey },
+        select: { id: true },
+      });
+
+      if (!existingNotif) {
+        await createNotificationSafe({
+          userId: contract.freelancerId,
+          type: NotificationType.CONTRACT_STATUS,
+          title: `Contract Status Updated: ${targetStatus}`,
+          message: `Contract "${contract.title}" status changed to ${targetStatus.toLowerCase()}.`,
+          link: `/contracts/${contract.id}`,
+          idempotencyKey: expectedKey,
+        });
+      }
+
       return {
         success: true,
         contractId: contract.id,
@@ -472,21 +806,142 @@ export async function updateContractStatusAction(
       };
     }
 
-    const updated = await prisma.contract.update({
-      where: { id: contractId },
+    // Atomic conditional update: Compare-And-Swap (CAS) on observed status AND lifecycleVersion
+    let updateRes = await prisma.contract.updateMany({
+      where: {
+        id: contractId,
+        status: contract.status,
+        lifecycleVersion: contract.lifecycleVersion,
+      },
       data: {
         status: targetStatus as ContractStatus,
+        lifecycleVersion: { increment: 1 },
         endDate:
           targetStatus === ContractStatus.COMPLETED ||
           targetStatus === ContractStatus.TERMINATED
             ? new Date()
             : null,
       },
+    });
+
+    if (updateRes.count === 0) {
+      // Re-read latest contract state to determine why CAS did not match
+      const freshContract = await prisma.contract.findUnique({
+        where: { id: contractId },
+        select: {
+          id: true,
+          status: true,
+          lifecycleVersion: true,
+          freelancerId: true,
+          title: true,
+        },
+      });
+
+      // Case A: Contract not found
+      if (!freshContract) {
+        return {
+          success: false,
+          error: "Contract not found.",
+        };
+      }
+
+      // Case B: Contract already has requested target status (idempotent retry or concurrent duplicate)
+      if (freshContract.status === targetStatus) {
+        const expectedKey = `contract:${freshContract.id}:status:${targetStatus}:v${freshContract.lifecycleVersion}`;
+        const existingNotif = await prisma.notification.findFirst({
+          where: { idempotencyKey: expectedKey },
+          select: { id: true },
+        });
+
+        if (!existingNotif) {
+          await createNotificationSafe({
+            userId: freshContract.freelancerId,
+            type: NotificationType.CONTRACT_STATUS,
+            title: `Contract Status Updated: ${targetStatus}`,
+            message: `Contract "${freshContract.title}" status changed to ${targetStatus.toLowerCase()}.`,
+            link: `/contracts/${freshContract.id}`,
+            idempotencyKey: expectedKey,
+          });
+        }
+
+        return {
+          success: true,
+          contractId: freshContract.id,
+          status: freshContract.status,
+        };
+      }
+
+      // Case C: Contract is in terminal state (COMPLETED or TERMINATED)
+      if (
+        freshContract.status === ContractStatus.COMPLETED ||
+        freshContract.status === ContractStatus.TERMINATED
+      ) {
+        return {
+          success: false,
+          error: `Cannot update status. Contract is already ${freshContract.status.toLowerCase()} and cannot be changed.`,
+        };
+      }
+
+      // Legacy document compatibility check:
+      // If contract was read at version 1, and freshContract still has the same status and version 1,
+      // the CAS update count was 0 because the legacy document in MongoDB lacks the lifecycleVersion field.
+      // We perform an atomic CAS matching status and backfilling lifecycleVersion to 2.
+      if (
+        contract.lifecycleVersion === 1 &&
+        freshContract.status === contract.status &&
+        freshContract.lifecycleVersion === 1
+      ) {
+        updateRes = await prisma.contract.updateMany({
+          where: {
+            id: contractId,
+            status: contract.status,
+          },
+          data: {
+            status: targetStatus as ContractStatus,
+            lifecycleVersion: 2,
+            endDate:
+              targetStatus === ContractStatus.COMPLETED ||
+              targetStatus === ContractStatus.TERMINATED
+                ? new Date()
+                : null,
+          },
+        });
+      }
+
+      // If updateRes.count is still 0 after legacy check, handle concurrency conflict:
+      if (updateRes.count === 0) {
+        // Case D: Concurrency conflict (status changed or ABA version change)
+        if (freshContract.status !== contract.status) {
+          return {
+            success: false,
+            error: `Contract status was concurrently updated to ${freshContract.status.toLowerCase()}. Please refresh and try again.`,
+          };
+        }
+
+        return {
+          success: false,
+          error: "Contract state was modified concurrently. Please refresh and try again.",
+        };
+      }
+    }
+
+    // Successfully transitioned the contract state
+    const updated = await prisma.contract.findUnique({
+      where: { id: contractId },
       select: {
         id: true,
         status: true,
+        updatedAt: true,
+        lifecycleVersion: true,
       },
     });
+
+    if (!updated) {
+      return {
+        success: false,
+        error: "Contract not found after update.",
+      };
+    }
 
     revalidatePath("/contracts");
     revalidatePath(`/contracts/${contractId}`);
@@ -500,6 +955,7 @@ export async function updateContractStatusAction(
       title: `Contract Status Updated: ${targetStatus}`,
       message: `Contract "${contract.title}" status changed to ${targetStatus.toLowerCase()}.`,
       link: `/contracts/${contract.id}`,
+      idempotencyKey: `contract:${updated.id}:status:${targetStatus}:v${updated.lifecycleVersion}`,
     });
 
     return {
@@ -539,21 +995,17 @@ export type DeleteContractResult = {
 export async function deleteContractAction(
   input: unknown
 ): Promise<DeleteContractResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only client accounts can manage contracts."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to perform this action.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "CLIENT") {
-    return {
-      success: false,
-      error: "Unauthorized: Only client accounts can manage contracts.",
-    };
-  }
+  const user = authRes.user;
 
   const result = DeleteContractSchema.safeParse(input);
   if (!result.success) {
@@ -571,6 +1023,8 @@ export async function deleteContractAction(
       select: {
         id: true,
         clientId: true,
+        jobId: true,
+        proposalId: true,
         status: true,
       },
     });
@@ -589,7 +1043,16 @@ export async function deleteContractAction(
       };
     }
 
-    // 1. Audit Check: Preserve Payment records
+    // 1. Audit Check: Completed contracts must permanently retain historical records
+    if (contract.status === ContractStatus.COMPLETED) {
+      return {
+        success: false,
+        error:
+          "Cannot delete contract: Completed contracts must be permanently retained for financial and historical audit compliance.",
+      };
+    }
+
+    // 2. Audit Check: Preserve Payment records
     const paymentCount = await prisma.payment.count({
       where: { contractId },
     });
@@ -602,7 +1065,7 @@ export async function deleteContractAction(
       };
     }
 
-    // 2. Audit Check: Preserve Time Entries / Timesheets
+    // 3. Audit Check: Preserve Time Entries / Timesheets
     const timeEntryCount = await prisma.timeEntry.count({
       where: { contractId },
     });
@@ -615,7 +1078,22 @@ export async function deleteContractAction(
       };
     }
 
-    // 3. Audit Check: Check for active or paid milestones
+    // 4. Audit Check: Preserve public reviews
+    const reviewCount = prisma.review?.count
+      ? await prisma.review.count({
+          where: { contractId },
+        })
+      : 0;
+
+    if (reviewCount > 0) {
+      return {
+        success: false,
+        error:
+          "Cannot delete contract: Reviews exist. Contracts with review history must be permanently retained.",
+      };
+    }
+
+    // 5. Audit Check: Check for active or paid milestones
     const activeMilestone = await prisma.contractMilestone.findFirst({
       where: {
         contractId,
@@ -644,25 +1122,83 @@ export async function deleteContractAction(
     }
 
     // Safe deletion: Contract has zero financial activity.
-    // Atomically clean up related draft entities and contract.
+    // Atomically serialize, verify, clean up related draft entities, restore job/proposal state, and delete contract.
     await prisma.$transaction(async (tx) => {
+      // Establish document write lock on the Contract record to serialize competing operations
+      if (tx.contract?.update) {
+        await tx.contract.update({
+          where: { id: contractId },
+          data: { updatedAt: new Date() },
+          select: { id: true },
+        });
+      }
+
+      // Transactional re-verification: Ensure no payment was created concurrently
+      if (tx.payment?.count) {
+        const txPaymentCount = await tx.payment.count({ where: { contractId } });
+        if (txPaymentCount > 0) {
+          throw new Error(
+            "Cannot delete contract: Financial records exist. Contracts with payment history must be permanently retained for financial audit compliance."
+          );
+        }
+      }
+
+      // Transactional re-verification: Ensure no time entry was created concurrently
+      if (tx.timeEntry?.count) {
+        const txTimeEntryCount = await tx.timeEntry.count({ where: { contractId } });
+        if (txTimeEntryCount > 0) {
+          throw new Error(
+            "Cannot delete contract: Timesheet records exist. Contracts with logged time entries must be permanently retained for audit compliance."
+          );
+        }
+      }
+
+      // Safely restore associated Job to OPEN status so client can re-hire
+      if (contract.jobId && tx.job?.update) {
+        await tx.job.update({
+          where: { id: contract.jobId },
+          data: { status: JobStatus.OPEN },
+        });
+      }
+
+      // Safely restore associated Proposal to PENDING status so freelancer is not stranded
+      if (contract.proposalId && tx.proposal?.update) {
+        await tx.proposal.update({
+          where: { id: contract.proposalId },
+          data: { status: ProposalStatus.PENDING },
+        });
+      }
+
       // Delete any draft milestones
-      await tx.contractMilestone.deleteMany({
-        where: { contractId },
-      });
+      if (tx.contractMilestone?.deleteMany) {
+        await tx.contractMilestone.deleteMany({
+          where: { contractId },
+        });
+      }
 
       // Delete associated conversation if exists
-      const conversation = await tx.conversation.findUnique({
-        where: { contractId },
-        select: { id: true },
-      });
-
-      if (conversation) {
-        await tx.message.deleteMany({
-          where: { conversationId: conversation.id },
+      if (tx.conversation?.findUnique) {
+        const conversation = await tx.conversation.findUnique({
+          where: { contractId },
+          select: { id: true },
         });
-        await tx.conversation.delete({
-          where: { id: conversation.id },
+
+        if (conversation) {
+          if (tx.message?.deleteMany) {
+            await tx.message.deleteMany({
+              where: { conversationId: conversation.id },
+            });
+          }
+          await tx.conversation.delete({
+            where: { id: conversation.id },
+          });
+        }
+      }
+
+      // Clean up any timer reservations
+      if (tx.activeTimerReservation?.deleteMany) {
+        await tx.activeTimerReservation.deleteMany({
+          where: { contractId },
         });
       }
 
@@ -679,6 +1215,28 @@ export async function deleteContractAction(
       contractId,
     };
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "";
+    if (
+      errorMsg.includes("Financial records exist") ||
+      errorMsg.includes("Timesheet records exist") ||
+      errorMsg.includes("Active or settled milestones exist") ||
+      errorMsg.includes("Reviews exist") ||
+      errorMsg.includes("Completed contracts")
+    ) {
+      return {
+        success: false,
+        error: errorMsg,
+      };
+    }
+
+    if ((error as { code?: string })?.code === "P2003") {
+      return {
+        success: false,
+        error:
+          "Cannot delete contract: Referential integrity protection active. Dependent financial records exist.",
+      };
+    }
+
     console.error(
       "[WorkPulse Delete Contract Error]:",
       error instanceof Error ? error.message : "Database error"

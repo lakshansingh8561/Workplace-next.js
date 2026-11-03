@@ -95,6 +95,15 @@ export async function POST(request: Request) {
       const now = new Date();
 
       await prisma.$transaction(async (tx) => {
+        // Coordinate through shared Contract document write lock
+        if (tx.contract?.update) {
+          await tx.contract.update({
+            where: { id: payment.contractId },
+            data: { updatedAt: new Date() },
+            select: { id: true },
+          });
+        }
+
         await tx.payment.update({
           where: { id: payment.id },
           data: {

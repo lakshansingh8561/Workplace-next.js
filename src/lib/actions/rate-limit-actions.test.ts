@@ -27,9 +27,35 @@ vi.mock("@/lib/prisma", () => {
   return { prisma: mockPrisma };
 });
 
-vi.mock("@/lib/session", () => ({
-  getCurrentUser: vi.fn(),
-}));
+vi.mock("@/lib/session", () => {
+  const getCurrentUser = vi.fn();
+  return {
+    getCurrentUser,
+    requireUser: vi.fn(),
+    requireRole: vi.fn(),
+    requireVerifiedUser: vi.fn(),
+    verifyUserForAction: vi.fn(async (allowed?: string | string[]) => {
+      const user = await getCurrentUser();
+      if (!user) {
+        return { success: false, error: "Authentication required: You must be signed in to perform this action.", code: "UNAUTHENTICATED" };
+      }
+      if (user.roleSelected === false) {
+        return { success: false, error: "Please complete onboarding before performing this action.", code: "UNAUTHORIZED_ROLE" };
+      }
+      if (allowed) {
+        const allowedList = Array.isArray(allowed) ? allowed : [allowed];
+        if (!allowedList.includes(user.role)) {
+          const roleLabels = allowedList.map((r) => r.toLowerCase()).join(" or ");
+          return { success: false, error: `Unauthorized: Only ${roleLabels} accounts can perform this action.`, code: "UNAUTHORIZED_ROLE" };
+        }
+      }
+      if (user.emailVerified === null) {
+        return { success: false, error: "Please verify your email address to access this feature.", code: "EMAIL_NOT_VERIFIED" };
+      }
+      return { success: true, user: { ...user, emailVerified: user.emailVerified || new Date() } };
+    }),
+  };
+});
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),

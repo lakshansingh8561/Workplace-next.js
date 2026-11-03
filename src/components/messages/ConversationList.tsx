@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ConversationSummaryDto } from "@/lib/actions/message";
+import { Avatar } from "@/components/ui/Avatar";
 
 interface ConversationListProps {
   conversations: ConversationSummaryDto[];
@@ -15,12 +16,28 @@ export function ConversationList({
   onSelectConversation,
 }: ConversationListProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [tabFilter, setTabFilter] = useState<"ALL" | "CONTRACTS" | "PRE_HIRE">("ALL");
+
+  const contractCount = conversations.filter(
+    (c) => c.type === "CONTRACT" || !c.type
+  ).length;
+  const preHireCount = conversations.filter(
+    (c) => c.type === "PRE_HIRE"
+  ).length;
 
   const filtered = conversations.filter((c) => {
-    const q = searchQuery.toLowerCase();
-    const nameMatch = c.counterparty.name?.toLowerCase().includes(q);
-    const contractMatch = c.contract.title.toLowerCase().includes(q);
-    return nameMatch || contractMatch;
+    const isPreHire = c.type === "PRE_HIRE";
+    if (tabFilter === "CONTRACTS" && isPreHire) return false;
+    if (tabFilter === "PRE_HIRE" && !isPreHire) return false;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const nameMatch = c.counterparty.name?.toLowerCase().includes(q);
+      const contractMatch = c.contract.title.toLowerCase().includes(q);
+      const jobMatch = c.job?.title.toLowerCase().includes(q);
+      return nameMatch || contractMatch || Boolean(jobMatch);
+    }
+    return true;
   });
 
   const formatSnippetTime = (isoString: string) => {
@@ -45,23 +62,24 @@ export function ConversationList({
 
   return (
     <div className="flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-zinc-900">
-      {/* Header & Search */}
-      <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 shrink-0 w-full min-w-0">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-extrabold text-zinc-900 dark:text-white">
+      {/* Header, Search & Filter Tabs */}
+      <div className="p-3.5 sm:p-4 border-b border-zinc-100 dark:border-zinc-800 shrink-0 w-full min-w-0 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-extrabold text-zinc-950 dark:text-white">
             Messages
           </h2>
-          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
             {conversations.length}
           </span>
         </div>
 
+        {/* Search */}
         <div className="relative w-full min-w-0">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search conversations..."
+            placeholder="Search messages or projects..."
             className="w-full rounded-xl border border-zinc-200 bg-zinc-50/80 pl-9 pr-3 py-2 text-xs text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-white dark:placeholder-zinc-500 transition"
           />
           <svg
@@ -77,6 +95,52 @@ export function ConversationList({
               d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
             />
           </svg>
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2.5 top-2 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Tabs: All / Contracts / Pre-Hire */}
+        <div className="flex gap-1 p-0.5 rounded-xl bg-zinc-100 dark:bg-zinc-800/60 text-[11px] font-bold">
+          <button
+            type="button"
+            onClick={() => setTabFilter("ALL")}
+            className={`flex-1 py-1 rounded-lg transition-all ${
+              tabFilter === "ALL"
+                ? "bg-white text-zinc-950 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+            }`}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            onClick={() => setTabFilter("CONTRACTS")}
+            className={`flex-1 py-1 rounded-lg transition-all ${
+              tabFilter === "CONTRACTS"
+                ? "bg-white text-zinc-950 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+            }`}
+          >
+            Contracts ({contractCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTabFilter("PRE_HIRE")}
+            className={`flex-1 py-1 rounded-lg transition-all ${
+              tabFilter === "PRE_HIRE"
+                ? "bg-white text-zinc-950 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+            }`}
+          >
+            Pre-Hire ({preHireCount})
+          </button>
         </div>
       </div>
 
@@ -86,17 +150,28 @@ export function ConversationList({
           <div className="p-8 text-center text-zinc-500 dark:text-zinc-400">
             <span className="text-2xl block mb-2">💬</span>
             <p className="text-xs font-semibold">
-              {searchQuery ? "No matching conversations" : "No contract conversations yet"}
-            </p>
-            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">
               {searchQuery
-                ? "Try searching for a different name or contract title."
-                : "Messages are created when you engage on active contracts."}
+                ? "No matching conversations"
+                : tabFilter === "PRE_HIRE"
+                ? "No pre-hire conversations"
+                : tabFilter === "CONTRACTS"
+                ? "No contract conversations"
+                : "No conversations yet"}
+            </p>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 max-w-xs mx-auto">
+              {searchQuery
+                ? "Try searching for another candidate, client, or job title."
+                : "When you interview candidates or award contracts, discussions will appear here."}
             </p>
           </div>
         ) : (
           filtered.map((c) => {
             const isActive = c.id === activeConversationId;
+            const isPreHire = c.type === "PRE_HIRE";
+            const projectTitle = isPreHire
+              ? c.job?.title || c.contract.title
+              : c.contract.title;
+
             return (
               <button
                 key={c.id}
@@ -110,13 +185,13 @@ export function ConversationList({
               >
                 {/* Avatar */}
                 <div className="relative shrink-0">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white shadow-xs">
-                    {c.counterparty.name
-                      ? c.counterparty.name.charAt(0).toUpperCase()
-                      : c.counterparty.role === "CLIENT"
-                      ? "C"
-                      : "F"}
-                  </div>
+                  <Avatar
+                    src={c.counterparty.image}
+                    name={c.counterparty.name}
+                    role={c.counterparty.role}
+                    userId={c.counterparty.id}
+                    size="sm"
+                  />
                   {c.unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-emerald-600 px-1 text-[9px] font-bold text-white shadow-xs">
                       {c.unreadCount}
@@ -128,22 +203,31 @@ export function ConversationList({
                 <div className="flex-1 min-w-0 overflow-hidden">
                   <div className="flex items-center justify-between gap-1 mb-0.5">
                     <span className="text-xs font-bold text-zinc-900 dark:text-white truncate block">
-                      {c.counterparty.name || (c.counterparty.role === "CLIENT" ? "Client" : "Freelancer")}
+                      {c.counterparty.name ||
+                        (c.counterparty.role === "CLIENT" ? "Client" : "Freelancer")}
                     </span>
                     <span className="text-[10px] text-zinc-400 shrink-0 whitespace-nowrap">
                       {formatSnippetTime(c.lastMessageAt)}
                     </span>
                   </div>
 
+                  {/* Badges row: Pre-Hire vs Contract + Role */}
                   <div className="flex items-center gap-1.5 mb-1 overflow-hidden">
-                    <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 shrink-0">
-                      {c.counterparty.role === "CLIENT" ? "Client" : "Freelancer"}
+                    <span
+                      className={`rounded px-1.5 py-0.2 text-[9px] font-extrabold uppercase shrink-0 ${
+                        isPreHire
+                          ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
+                          : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                      }`}
+                    >
+                      {isPreHire ? "Pre-Hire" : "Contract"}
                     </span>
-                    <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 truncate block">
-                      {c.contract.title}
+                    <span className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300 truncate block">
+                      {projectTitle}
                     </span>
                   </div>
 
+                  {/* Last message preview */}
                   <p
                     className={`text-[11px] truncate block ${
                       c.unreadCount > 0

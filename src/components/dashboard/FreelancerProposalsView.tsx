@@ -88,6 +88,12 @@ export function FreelancerProposalsView({
 
         <div className="flex items-center gap-3">
           <Link
+            href="/dashboard/freelancer/invitations"
+            className="inline-flex items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-2 text-xs font-bold text-indigo-700 shadow-sm hover:bg-indigo-100 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60 transition active:scale-95 whitespace-nowrap shrink-0"
+          >
+            🤝 Invitations
+          </Link>
+          <Link
             href="/dashboard/freelancer/payments"
             className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs font-bold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 transition active:scale-95 whitespace-nowrap shrink-0"
           >

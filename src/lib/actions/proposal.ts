@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, verifyUserForAction } from "@/lib/session";
 import {
   SubmitProposalSchema,
   UpdateProposalStatusSchema,
@@ -24,6 +24,7 @@ export type UpdateProposalStatusResult = {
   success: boolean;
   proposalId?: string;
   contractId?: string;
+  conversationId?: string;
   status?: string;
   error?: string;
 };
@@ -46,38 +47,28 @@ export type FreelancerProposalSummary = {
  * Server Action to submit a proposal for a job.
  * Enforces:
  * 1. Authenticated session.
- * 2. Role is FREELANCER (rejects CLIENT and unauthenticated callers).
- * 3. Role onboarding is completed.
- * 4. Cannot submit to own job.
- * 5. Job exists and is currently OPEN.
- * 6. Bid complies with job payment type (FIXED min $5, HOURLY min $3/hr).
- * 7. Enforces single proposal per freelancer per job.
+ * 2. Verified email address.
+ * 3. Role is FREELANCER (rejects CLIENT and unauthenticated callers).
+ * 4. Role onboarding is completed.
+ * 5. Cannot submit to own job.
+ * 6. Job exists and is currently OPEN.
+ * 7. Bid complies with job payment type (FIXED min $5, HOURLY min $3/hr).
+ * 8. Enforces single proposal per freelancer per job.
  */
 export async function submitProposalAction(
   input: unknown
 ): Promise<SubmitProposalResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "FREELANCER",
+    "Unauthorized: Only freelancer accounts can submit proposals."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to submit a proposal.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "FREELANCER") {
-    return {
-      success: false,
-      error: "Unauthorized: Only freelancer accounts can submit proposals.",
-    };
-  }
-
-  if (!user.roleSelected) {
-    return {
-      success: false,
-      error: "Please complete your role onboarding before submitting proposals.",
-    };
-  }
+  const user = authRes.user;
 
   const result = SubmitProposalSchema.safeParse(input);
 
@@ -261,6 +252,7 @@ export async function submitProposalAction(
         title: "New Proposal Received",
         message: `${user.name || "A freelancer"} submitted a proposal of $${data.bidAmount} for "${job.title}".`,
         link: `/dashboard/client/jobs/${job.id}/proposals`,
+        idempotencyKey: `proposal:${proposal.id}:submitted`,
       });
     }
 
@@ -316,21 +308,17 @@ export async function submitProposalAction(
 export async function updateProposalStatusAction(
   input: unknown
 ): Promise<UpdateProposalStatusResult> {
-  const user = await getCurrentUser();
-
-  if (!user) {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only client accounts can manage proposals."
+  );
+  if (!authRes.success) {
     return {
       success: false,
-      error: "You must be signed in to manage proposals.",
+      error: authRes.error,
     };
   }
-
-  if (user.role !== "CLIENT") {
-    return {
-      success: false,
-      error: "Unauthorized: Only client accounts can manage proposals.",
-    };
-  }
+  const user = authRes.user;
 
   const result = UpdateProposalStatusSchema.safeParse(input);
 
@@ -347,6 +335,14 @@ export async function updateProposalStatusAction(
     const proposal = await prisma.proposal.findUnique({
       where: { id: proposalId },
       include: {
+        freelancer: {
+          select: {
+            id: true,
+            name: true,
+            role: true,
+            roleSelected: true,
+          },
+        },
         job: {
           select: {
             id: true,
@@ -370,6 +366,18 @@ export async function updateProposalStatusAction(
       return {
         success: false,
         error: "Unauthorized: You do not own the job associated with this proposal.",
+      };
+    }
+
+    // Verify freelancer eligibility if available
+    if (
+      proposal.freelancer &&
+      (proposal.freelancer.role !== "FREELANCER" ||
+        proposal.freelancer.roleSelected === false)
+    ) {
+      return {
+        success: false,
+        error: "The freelancer associated with this proposal is no longer eligible.",
       };
     }
 
@@ -477,7 +485,7 @@ export async function updateProposalStatusAction(
           },
         });
 
-        // 6. Single-winner: Automatically decline all other competing pending proposals
+        // 8. Single-winner: Automatically decline all other competing pending proposals
         await tx.proposal.updateMany({
           where: {
             jobId: freshProposal.job.id,
@@ -487,19 +495,70 @@ export async function updateProposalStatusAction(
           data: { status: "REJECTED" },
         });
 
+        // 9. Atomic conversation conversion or creation:
+        // Upgrade pre-hire conversation to CONTRACT or create new CONTRACT conversation
+        let conversation = await tx.conversation.findUnique({
+          where: {
+            jobId_freelancerId: {
+              jobId: freshProposal.job.id,
+              freelancerId: freshProposal.freelancerId,
+            },
+          },
+          select: { id: true, type: true, contractId: true },
+        });
+
+        if (conversation) {
+          // Pre-hire conversation exists: upgrade to CONTRACT and bind newly formed contract
+          conversation = await tx.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              contractId: newContract.id,
+              type: "CONTRACT",
+            },
+            select: { id: true, type: true, contractId: true },
+          });
+        } else {
+          // No prior pre-hire conversation: establish new CONTRACT conversation thread
+          conversation = await tx.conversation.create({
+            data: {
+              contractId: newContract.id,
+              jobId: freshProposal.job.id,
+              clientId: user.id,
+              freelancerId: freshProposal.freelancerId,
+              type: "CONTRACT",
+              lastMessageAt: new Date(),
+            },
+            select: { id: true, type: true, contractId: true },
+          });
+        }
+
         return {
           proposal: acceptedProp,
           contract: newContract,
+          conversation,
         };
       });
 
-      // In-app Notification for the winning freelancer
+      const freelancerName = proposal.freelancer?.name || "the freelancer";
+
+      // In-app Notification for the winning freelancer (Proposal Accepted / Contract Created)
       await createNotificationSafe({
         userId: proposal.freelancerId,
         type: "CONTRACT_STATUS",
         title: "Proposal Accepted! 🎉",
         message: `Your proposal for "${proposal.job.title}" has been accepted! Contract #${txResult.contract.id.slice(-6)} is now active.`,
         link: `/contracts/${txResult.contract.id}`,
+        idempotencyKey: `contract:${txResult.contract.id}:accepted:freelancer`,
+      });
+
+      // In-app Notification for the hiring client (Freelancer Hired / Contract Created)
+      await createNotificationSafe({
+        userId: user.id,
+        type: "CONTRACT_STATUS",
+        title: "Freelancer Hired! 🚀",
+        message: `You hired ${freelancerName} for "${proposal.job.title}". Contract #${txResult.contract.id.slice(-6)} is now active.`,
+        link: `/contracts/${txResult.contract.id}`,
+        idempotencyKey: `contract:${txResult.contract.id}:created:client`,
       });
 
       // In-app Notifications for competing pending freelancers automatically declined
@@ -510,6 +569,7 @@ export async function updateProposalStatusAction(
           title: "Proposal Update",
           message: `Another proposal was selected for "${proposal.job.title}". Thank you for your application!`,
           link: `/jobs/${proposal.job.id}`,
+          idempotencyKey: `proposal:${comp.id}:declined:competing`,
         });
       }
 
@@ -517,6 +577,7 @@ export async function updateProposalStatusAction(
       revalidatePath("/dashboard/freelancer");
       revalidatePath("/contracts");
       revalidatePath(`/contracts/${txResult.contract.id}`);
+      revalidatePath("/messages");
       revalidatePath(`/jobs/${proposal.job.id}`);
       revalidatePath(`/dashboard/client/jobs/${proposal.job.id}/proposals`);
 
@@ -524,6 +585,7 @@ export async function updateProposalStatusAction(
         success: true,
         proposalId: txResult.proposal.id,
         contractId: txResult.contract.id,
+        conversationId: txResult.conversation.id,
         status: "ACCEPTED",
       };
     } else {
@@ -545,6 +607,7 @@ export async function updateProposalStatusAction(
         title: "Proposal Update",
         message: `Your proposal for "${proposal.job.title}" was declined by the client.`,
         link: `/jobs/${proposal.job.id}`,
+        idempotencyKey: `proposal:${proposal.id}:declined`,
       });
 
       revalidatePath(`/jobs/${updated.jobId}`);

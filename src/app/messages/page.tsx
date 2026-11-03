@@ -32,24 +32,29 @@ async function MessagesContent({ searchParams }: MessagesPageProps) {
       : undefined;
 
   let activeConversationId: string | null = conversationIdParam || null;
+  let contractResolutionError: string | null = null;
 
   // If contractId is provided, retrieve or initialize the conversation for that contract
   if (contractIdParam) {
     const res = await getOrCreateConversationForContractAction(contractIdParam);
     if (res.success && res.conversationId) {
       activeConversationId = res.conversationId;
+    } else {
+      contractResolutionError = res.error || "Unable to load conversation for this contract.";
     }
   }
 
   // Fetch all user conversations
   const conversationsRes = await getConversationsAction();
   const conversations = conversationsRes.conversations || [];
+  const inboxError = !conversationsRes.success ? conversationsRes.error : null;
 
   return (
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 pb-12">
       <MessagingLayout
         initialConversations={conversations}
         initialActiveConversationId={activeConversationId}
+        initialError={contractResolutionError || inboxError}
         currentUserId={user.id}
       />
     </main>

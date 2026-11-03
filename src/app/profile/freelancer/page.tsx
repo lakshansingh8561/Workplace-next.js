@@ -9,6 +9,7 @@ import {
   FreelancerProfileForm,
   FreelancerProfileInitialData,
 } from "@/components/profile/FreelancerProfileForm";
+import { ChangePasswordSection } from "@/components/profile/ChangePasswordSection";
 
 export const metadata: Metadata = {
   title: "Freelancer Profile Settings | WorkPulse",
@@ -54,7 +55,14 @@ async function FreelancerProfileContent() {
     portfolioUrls: dbUser.portfolioUrls || [],
   };
 
-  return <FreelancerProfileForm initialData={initialData} />;
+  return (
+    <div className="space-y-10">
+      <FreelancerProfileForm initialData={initialData} />
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 pb-16">
+        <ChangePasswordSection />
+      </div>
+    </div>
+  );
 }
 
 export default function FreelancerProfilePage() {

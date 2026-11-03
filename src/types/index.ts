@@ -250,9 +250,14 @@ export interface ChatMessage {
   };
 }
 
+export type ConversationType = "PRE_HIRE" | "CONTRACT";
+export type InvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "WITHDRAWN" | "EXPIRED";
+
 export interface ConversationItem {
   id: string;
-  contractId: string;
+  type?: ConversationType;
+  contractId?: string | null;
+  jobId?: string | null;
   clientId: string;
   freelancerId: string;
   lastMessageAt: string | Date;
@@ -260,11 +265,16 @@ export interface ConversationItem {
   updatedAt: string | Date;
   unreadCount?: number;
   lastMessage?: string | null;
-  contract: {
+  contract?: {
     id: string;
     title: string;
     status: string;
-  };
+  } | null;
+  job?: {
+    id: string;
+    title: string;
+    status: string;
+  } | null;
   client: {
     id: string;
     name?: string | null;

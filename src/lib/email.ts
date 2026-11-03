@@ -1,0 +1,399 @@
+// src/lib/email.ts
+/**
+ * WorkPulse Clean Email Delivery Infrastructure
+ *
+ * Implements a lightweight, zero-dependency email service abstraction.
+ * Supports:
+ * 1. Resend API via native fetch (when RESEND_API_KEY is configured).
+ * 2. Safe development/test simulation (when in dev/test environment).
+ * 3. Fails closed in production if no email provider is configured.
+ *
+ * Never exposes raw tokens, API keys, or secrets in logs.
+ */
+
+import nodemailer from "nodemailer";
+
+export interface SendEmailOptions {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+}
+
+export interface EmailDeliveryResult {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+  simulated?: boolean;
+}
+
+export interface EmailProviderStatus {
+  provider: "smtp" | "resend" | "simulation";
+  isConfigured: boolean;
+  senderConfigured: boolean;
+  presentVariables: string[];
+  missingVariables: string[];
+}
+
+/**
+ * Inspects environment variables to report email provider configuration safely
+ * without exposing secret values or credentials.
+ */
+export function getEmailProviderStatus(): EmailProviderStatus {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const emailUser = process.env.EMAIL_USER || process.env.SMTP_USER;
+  const emailPass = process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
+  const emailFrom = process.env.EMAIL_FROM;
+  const smtpHost = process.env.SMTP_HOST || (emailUser?.includes("@gmail.com") ? "smtp.gmail.com" : undefined);
+
+  const presentVariables: string[] = [];
+  const missingVariables: string[] = [];
+
+  if (resendApiKey) presentVariables.push("RESEND_API_KEY");
+  else missingVariables.push("RESEND_API_KEY");
+
+  if (process.env.EMAIL_USER) presentVariables.push("EMAIL_USER");
+  else missingVariables.push("EMAIL_USER");
+
+  if (process.env.EMAIL_PASS) presentVariables.push("EMAIL_PASS");
+  else missingVariables.push("EMAIL_PASS");
+
+  if (process.env.EMAIL_FROM) presentVariables.push("EMAIL_FROM");
+  else missingVariables.push("EMAIL_FROM");
+
+  if (process.env.SMTP_HOST) presentVariables.push("SMTP_HOST");
+  else missingVariables.push("SMTP_HOST");
+
+  if (process.env.SMTP_PORT) presentVariables.push("SMTP_PORT");
+  else missingVariables.push("SMTP_PORT");
+
+  if (resendApiKey) {
+    return {
+      provider: "resend",
+      isConfigured: true,
+      senderConfigured: Boolean(emailFrom),
+      presentVariables,
+      missingVariables,
+    };
+  }
+
+  if (emailUser && emailPass && smtpHost) {
+    return {
+      provider: "smtp",
+      isConfigured: true,
+      senderConfigured: Boolean(emailFrom || emailUser),
+      presentVariables,
+      missingVariables,
+    };
+  }
+
+  return {
+    provider: "simulation",
+    isConfigured: false,
+    senderConfigured: Boolean(emailFrom),
+    presentVariables,
+    missingVariables,
+  };
+}
+
+/**
+ * Resolves the application public base URL for links.
+ */
+export function getAppBaseUrl(): string {
+  const envUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_URL ||
+    process.env.NEXTAUTH_URL;
+
+  if (envUrl && typeof envUrl === "string" && envUrl.trim().length > 0) {
+    return envUrl.trim().replace(/\/$/, "");
+  }
+
+  return "http://localhost:3000";
+}
+
+/**
+ * Dispatches an email via the configured provider or safe local simulation.
+ */
+export async function sendEmail({
+  to,
+  subject,
+  html,
+  text,
+}: SendEmailOptions): Promise<EmailDeliveryResult> {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const emailUser = process.env.EMAIL_USER || process.env.SMTP_USER;
+  const emailPass = process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
+  const smtpHost = process.env.SMTP_HOST || (emailUser?.includes("@gmail.com") ? "smtp.gmail.com" : undefined);
+  const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 465;
+  const rawFrom = process.env.EMAIL_FROM || emailUser;
+  const fromAddress = rawFrom
+    ? (rawFrom.includes("<") ? rawFrom : `WorkPulse <${rawFrom}>`)
+    : "WorkPulse <noreply@workpulse.internal>";
+
+  // Automated test mode bypass (unless explicitly running live verification)
+  if (process.env.NODE_ENV === "test" && process.env.LIVE_EMAIL_TEST !== "true") {
+    return {
+      success: true,
+      simulated: true,
+      messageId: `test_msg_${Date.now()}`,
+    };
+  }
+
+  // 1. Production provider integration: Resend API
+  if (resendApiKey) {
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendApiKey.trim()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: [to.trim().toLowerCase()],
+          subject,
+          html,
+          text,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error(
+          `[WorkPulse Email Error] Resend API returned HTTP ${response.status}:`,
+          (errorData as { message?: string })?.message || "Unknown provider error"
+        );
+        return {
+          success: false,
+          error: "Email delivery failed with provider error.",
+        };
+      }
+
+      const result = (await response.json()) as { id?: string };
+      return {
+        success: true,
+        messageId: result.id,
+      };
+    } catch (err) {
+      console.error(
+        "[WorkPulse Email Error] Network exception connecting to Resend API:",
+        err instanceof Error ? err.message : "Network error"
+      );
+      return {
+        success: false,
+        error: "Network error delivering email.",
+      };
+    }
+  }
+
+  // 2. Production provider integration: SMTP (Nodemailer)
+  if (emailUser && emailPass && smtpHost) {
+    try {
+      const cleanPass = emailPass.replace(/\s+/g, "");
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        requireTLS: smtpPort === 587,
+        connectionTimeout: 10000, // 10s timeout
+        greetingTimeout: 10000, // 10s timeout
+        socketTimeout: 15000, // 15s timeout
+        auth: {
+          user: emailUser,
+          pass: cleanPass,
+        },
+      });
+
+      const info = await transporter.sendMail({
+        from: fromAddress,
+        to: to.trim().toLowerCase(),
+        subject,
+        text,
+        html,
+      });
+
+      return {
+        success: true,
+        messageId: info.messageId,
+      };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : "SMTP error";
+      console.error("[WorkPulse Email Error] SMTP delivery exception:", errMsg);
+      return {
+        success: false,
+        error: `SMTP email delivery failed: ${errMsg}`,
+      };
+    }
+  }
+
+  // 3. Production fail-safe: Never pretend emails were sent if unconfigured in production
+  if (process.env.NODE_ENV === "production") {
+    console.error(
+      "[WorkPulse Email Error] No email provider configured in production environment (RESEND_API_KEY or SMTP credentials missing)."
+    );
+    return {
+      success: false,
+      error: "Email service is temporarily unavailable. Please contact support.",
+    };
+  }
+
+  // 4. Safe development simulation when no provider credentials exist
+  console.log(
+    `[WorkPulse Email Dev] Simulated email dispatch to ${to} | Subject: "${subject}"`
+  );
+
+  return {
+    success: true,
+    simulated: true,
+    messageId: `dev_msg_${Date.now()}`,
+  };
+}
+
+/**
+ * Sends a password reset email with secure one-time link.
+ */
+export async function sendPasswordResetEmail({
+  to,
+  resetUrl,
+  recipientName,
+}: {
+  to: string;
+  resetUrl: string;
+  recipientName?: string | null;
+}): Promise<EmailDeliveryResult> {
+  const greeting = recipientName ? `Hello ${recipientName},` : "Hello,";
+
+  const subject = "Reset your WorkPulse password";
+
+  const text = `${greeting}
+
+We received a request to reset your password for your WorkPulse account.
+
+Please visit the following secure link to set a new password:
+${resetUrl}
+
+This link is valid for 30 minutes and can only be used once.
+
+If you did not request a password reset, you can safely ignore this email. Your existing password will remain unchanged.
+
+Best regards,
+The WorkPulse Team`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reset Your Password</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #09090b; color: #f4f4f5; margin: 0; padding: 40px 20px;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0">
+    <tr>
+      <td align="center">
+        <table width="520" border="0" cellspacing="0" cellpadding="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 36px;">
+          <tr>
+            <td style="padding-bottom: 24px; border-bottom: 1px solid #27272a;">
+              <span style="display: inline-block; width: 36px; height: 36px; line-height: 36px; text-align: center; background-color: #059669; color: #ffffff; font-weight: bold; border-radius: 8px; font-size: 18px;">W</span>
+              <span style="font-size: 18px; font-weight: 700; color: #ffffff; margin-left: 10px; vertical-align: middle;">WorkPulse</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-top: 24px;">
+              <h2 style="color: #ffffff; font-size: 20px; font-weight: 600; margin-top: 0; margin-bottom: 12px;">Password Reset Request</h2>
+              <p style="color: #a1a1aa; font-size: 14px; line-height: 22px; margin-top: 0; margin-bottom: 24px;">${greeting}</p>
+              <p style="color: #a1a1aa; font-size: 14px; line-height: 22px; margin-top: 0; margin-bottom: 24px;">We received a request to reset your password for your WorkPulse account. Click the button below to choose a new password.</p>
+              <div style="margin: 28px 0; text-align: center;">
+                <a href="${resetUrl}" style="background-color: #059669; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; display: inline-block;">Reset Password</a>
+              </div>
+              <p style="color: #71717a; font-size: 12px; line-height: 18px; margin-top: 24px; margin-bottom: 8px;">This link will expire in <strong>30 minutes</strong> and can only be used once.</p>
+              <p style="color: #71717a; font-size: 12px; line-height: 18px; margin: 0;">If you didn't request a password reset, you can safely ignore this email. Your account remains secure.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-top: 28px; border-top: 1px solid #27272a; margin-top: 28px;">
+              <p style="color: #52525b; font-size: 11px; margin: 0; line-height: 16px;">If the button does not work, copy and paste this URL into your browser:<br><span style="color: #10b981; word-break: break-all;">${resetUrl}</span></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return sendEmail({ to, subject, html, text });
+}
+
+/**
+ * Sends an email address verification email with secure one-time link.
+ */
+export async function sendVerificationEmail({
+  to,
+  verifyUrl,
+  recipientName,
+}: {
+  to: string;
+  verifyUrl: string;
+  recipientName?: string | null;
+}): Promise<EmailDeliveryResult> {
+  const greeting = recipientName ? `Hello ${recipientName},` : "Hello,";
+
+  const subject = "Verify your WorkPulse email address";
+
+  const text = `${greeting}
+
+Welcome to WorkPulse! Please verify your email address to confirm your account.
+
+Visit the following link to complete verification:
+${verifyUrl}
+
+This link is valid for 24 hours and can only be used once.
+
+If you did not sign up for a WorkPulse account, please disregard this email.
+
+Best regards,
+The WorkPulse Team`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Verify Your Email</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #09090b; color: #f4f4f5; margin: 0; padding: 40px 20px;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0">
+    <tr>
+      <td align="center">
+        <table width="520" border="0" cellspacing="0" cellpadding="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 36px;">
+          <tr>
+            <td style="padding-bottom: 24px; border-bottom: 1px solid #27272a;">
+              <span style="display: inline-block; width: 36px; height: 36px; line-height: 36px; text-align: center; background-color: #059669; color: #ffffff; font-weight: bold; border-radius: 8px; font-size: 18px;">W</span>
+              <span style="font-size: 18px; font-weight: 700; color: #ffffff; margin-left: 10px; vertical-align: middle;">WorkPulse</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-top: 24px;">
+              <h2 style="color: #ffffff; font-size: 20px; font-weight: 600; margin-top: 0; margin-bottom: 12px;">Confirm your email address</h2>
+              <p style="color: #a1a1aa; font-size: 14px; line-height: 22px; margin-top: 0; margin-bottom: 24px;">${greeting}</p>
+              <p style="color: #a1a1aa; font-size: 14px; line-height: 22px; margin-top: 0; margin-bottom: 24px;">Thanks for signing up for WorkPulse! Please confirm your email address by clicking the button below.</p>
+              <div style="margin: 28px 0; text-align: center;">
+                <a href="${verifyUrl}" style="background-color: #059669; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; display: inline-block;">Verify Email Address</a>
+              </div>
+              <p style="color: #71717a; font-size: 12px; line-height: 18px; margin-top: 24px; margin-bottom: 8px;">This link will expire in <strong>24 hours</strong> and can only be used once.</p>
+              <p style="color: #71717a; font-size: 12px; line-height: 18px; margin: 0;">If you didn't create a WorkPulse account, you can safely ignore this email.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-top: 28px; border-top: 1px solid #27272a; margin-top: 28px;">
+              <p style="color: #52525b; font-size: 11px; margin: 0; line-height: 16px;">If the button does not work, copy and paste this URL into your browser:<br><span style="color: #10b981; word-break: break-all;">${verifyUrl}</span></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return sendEmail({ to, subject, html, text });
+}

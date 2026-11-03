@@ -2,7 +2,13 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { updateProposalStatusAction } from "@/lib/actions/proposal";
+import { getOrCreatePreHireConversationAction } from "@/lib/actions/message";
+import { HireConfirmationModal } from "@/components/dashboard/HireConfirmationModal";
+import { SendInvitationModal } from "@/components/dashboard/SendInvitationModal";
+import { DeclineReasonModal } from "@/components/dashboard/DeclineReasonModal";
+import { Avatar } from "@/components/ui/Avatar";
 import { ProposalStatus } from "@/types";
 
 export interface ReviewProposalItem {
@@ -48,50 +54,142 @@ export function ClientProposalReview({
   job,
   initialProposals,
 }: ClientProposalReviewProps) {
+  const router = useRouter();
   const [proposals, setProposals] = useState<ReviewProposalItem[]>(initialProposals);
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [successToast, setSuccessToast] = useState<{
+    message: string;
+    link?: string;
+    linkText?: string;
+  } | null>(null);
   const [contractCreated, setContractCreated] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<string>(job.status);
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "ACCEPTED" | "REJECTED">("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
   const [isPending, startTransition] = useTransition();
+
+  // Modals state
+  const [hireModalProposal, setHireModalProposal] = useState<ReviewProposalItem | null>(null);
+  const [inviteModalProposal, setInviteModalProposal] = useState<ReviewProposalItem | null>(null);
+  const [declineModalProposal, setDeclineModalProposal] = useState<ReviewProposalItem | null>(null);
 
   const isHourly = job.type.toUpperCase() === "HOURLY";
 
-  const handleStatusChange = (proposalId: string, newStatus: "ACCEPTED" | "REJECTED") => {
+  // Counts for tabs
+  const pendingCount = proposals.filter((p) => p.status === "PENDING").length;
+  const acceptedCount = proposals.filter((p) => p.status === "ACCEPTED").length;
+  const rejectedCount = proposals.filter((p) => p.status === "REJECTED").length;
+
+  // Filtered proposals list
+  const filteredProposals = proposals.filter((p) => {
+    if (statusFilter !== "ALL" && p.status !== statusFilter) {
+      return false;
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const name = p.freelancer.name?.toLowerCase() || "";
+      const title = p.freelancer.title?.toLowerCase() || "";
+      const cover = p.coverLetter.toLowerCase();
+      const skills = (p.freelancer.skills || []).some((s) => s.toLowerCase().includes(q));
+      return name.includes(q) || title.includes(q) || cover.includes(q) || skills;
+    }
+    return true;
+  });
+
+  // Action: Start Pre-Hire Chat
+  const handleStartChat = (proposal: ReviewProposalItem) => {
+    setActionError(null);
+    setActiveActionId(proposal.id);
+
+    startTransition(async () => {
+      const res = await getOrCreatePreHireConversationAction(job.id, proposal.freelancerId);
+      if (!res.success || !res.conversationId) {
+        setActionError(res.error || "Failed to initialize conversation thread.");
+        setActiveActionId(null);
+        return;
+      }
+
+      router.push(`/messages?conversationId=${res.conversationId}`);
+    });
+  };
+
+  // Action: Confirm Hire (Accept Proposal)
+  const handleConfirmHire = () => {
+    if (!hireModalProposal) return;
+    const proposalId = hireModalProposal.id;
     setActionError(null);
     setActiveActionId(proposalId);
 
     startTransition(async () => {
       const res = await updateProposalStatusAction({
         proposalId,
-        status: newStatus,
+        status: "ACCEPTED",
       });
 
       if (!res.success) {
-        setActionError(res.error || "Failed to update proposal status.");
+        setActionError(res.error || "Failed to complete hiring action.");
         setActiveActionId(null);
+        setHireModalProposal(null);
+        return;
+      }
+
+      // Update state: winning proposal accepted, other pending proposals rejected
+      setProposals((prev) =>
+        prev.map((p) => {
+          if (p.id === proposalId) return { ...p, status: "ACCEPTED" };
+          if (p.status === "PENDING") return { ...p, status: "REJECTED" };
+          return p;
+        })
+      );
+
+      setJobStatus("CLOSED");
+      if (res.contractId) {
+        setContractCreated(res.contractId);
+        setSuccessToast({
+          message: "Contract created! Freelancer hired successfully.",
+          link: `/contracts/${res.contractId}`,
+          linkText: "View Contract →",
+        });
+      }
+
+      setActiveActionId(null);
+      setHireModalProposal(null);
+      router.refresh();
+    });
+  };
+
+  // Action: Confirm Decline (Reject Proposal)
+  const handleConfirmDecline = () => {
+    if (!declineModalProposal) return;
+    const proposalId = declineModalProposal.id;
+    setActionError(null);
+    setActiveActionId(proposalId);
+
+    startTransition(async () => {
+      const res = await updateProposalStatusAction({
+        proposalId,
+        status: "REJECTED",
+      });
+
+      if (!res.success) {
+        setActionError(res.error || "Failed to decline proposal.");
+        setActiveActionId(null);
+        setDeclineModalProposal(null);
         return;
       }
 
       setProposals((prev) =>
-        prev.map((p) => {
-          if (newStatus === "ACCEPTED") {
-            if (p.id === proposalId) return { ...p, status: "ACCEPTED" };
-            if (p.status === "PENDING") return { ...p, status: "REJECTED" };
-            return p;
-          }
-          return p.id === proposalId ? { ...p, status: newStatus } : p;
-        })
+        prev.map((p) => (p.id === proposalId ? { ...p, status: "REJECTED" } : p))
       );
 
-      if (newStatus === "ACCEPTED") {
-        setJobStatus("CLOSED");
-        if (res.contractId) {
-          setContractCreated(res.contractId);
-        }
-      }
+      setSuccessToast({
+        message: "Proposal has been declined.",
+      });
 
       setActiveActionId(null);
+      setDeclineModalProposal(null);
+      router.refresh();
     });
   };
 
@@ -128,6 +226,12 @@ export function ClientProposalReview({
         </div>
 
         <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard/client"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 transition"
+          >
+            Dashboard
+          </Link>
           <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
             {proposals.length} {proposals.length === 1 ? "Proposal" : "Proposals"}
           </span>
@@ -145,10 +249,37 @@ export function ClientProposalReview({
           </div>
           <Link
             href={`/contracts/${contractCreated}`}
-            className="inline-flex items-center rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500 transition shrink-0 ml-4"
+            className="inline-flex items-center rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition shrink-0 ml-4"
           >
             View Contract →
           </Link>
+        </div>
+      )}
+
+      {/* Toast Notification Banner */}
+      {successToast && (
+        <div className="mb-6 rounded-2xl bg-emerald-50 p-3.5 border border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800 text-xs font-semibold text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>✓</span>
+            <span>{successToast.message}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {successToast.link && (
+              <Link
+                href={successToast.link}
+                className="font-bold underline text-emerald-700 hover:text-emerald-900 dark:text-emerald-300"
+              >
+                {successToast.linkText || "View →"}
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={() => setSuccessToast(null)}
+              className="text-emerald-700 hover:text-emerald-900 font-bold ml-2"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 
@@ -166,35 +297,118 @@ export function ClientProposalReview({
         </div>
       )}
 
+      {/* Filter Tabs & Search Controls */}
+      <div className="mb-6 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        {/* Filter Tabs */}
+        <div className="flex flex-wrap gap-1.5 p-1 rounded-2xl bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200/80 dark:border-zinc-700/80">
+          <button
+            type="button"
+            onClick={() => setStatusFilter("ALL")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              statusFilter === "ALL"
+                ? "bg-white text-zinc-900 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+            }`}
+          >
+            All ({proposals.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter("PENDING")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              statusFilter === "PENDING"
+                ? "bg-white text-zinc-900 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+            }`}
+          >
+            Pending ({pendingCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter("ACCEPTED")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              statusFilter === "ACCEPTED"
+                ? "bg-white text-zinc-900 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+            }`}
+          >
+            Hired ({acceptedCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter("REJECTED")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              statusFilter === "REJECTED"
+                ? "bg-white text-zinc-900 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+            }`}
+          >
+            Declined ({rejectedCount})
+          </button>
+        </div>
+
+        {/* Search Input */}
+        <div className="relative w-full sm:w-64">
+          <input
+            type="text"
+            placeholder="Search candidates or skills..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-1.5 text-xs text-zinc-900 shadow-xs placeholder-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2.5 top-1.5 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Proposals List or Empty State */}
-      {proposals.length === 0 ? (
+      {filteredProposals.length === 0 ? (
         <div className="rounded-3xl border border-zinc-200 bg-white p-12 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 text-2xl dark:bg-zinc-800">
             📬
           </div>
           <h3 className="mt-4 text-lg font-bold text-zinc-900 dark:text-white">
-            No proposals submitted yet
+            {searchQuery
+              ? "No matching candidate proposals"
+              : statusFilter === "PENDING"
+              ? "No pending proposals awaiting review"
+              : statusFilter === "ACCEPTED"
+              ? "No hired proposals for this job"
+              : statusFilter === "REJECTED"
+              ? "No declined proposals"
+              : "No proposals submitted yet"}
           </h3>
           <p className="mt-2 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 max-w-md mx-auto">
-            Freelancers can discover your job on the marketplace and submit applications. Check back soon!
+            {searchQuery
+              ? "Try adjusting your search keywords to find matching candidates."
+              : "Freelancers can discover your job on the marketplace and submit applications."}
           </p>
-          <div className="mt-6">
-            <Link
-              href="/jobs"
-              className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 transition"
-            >
-              Browse Marketplace
-            </Link>
-          </div>
+          {searchQuery && (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="text-xs font-bold text-emerald-600 hover:underline dark:text-emerald-400"
+              >
+                Clear Search
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-6">
-          {proposals.map((proposal) => {
+          {filteredProposals.map((proposal) => {
             const isProcessingThis = isPending && activeActionId === proposal.id;
             const freelancerDisplayName =
               proposal.freelancer.name ||
               (proposal.freelancer.email ? proposal.freelancer.email.split("@")[0] : "Freelancer");
-            const initials = freelancerDisplayName.slice(0, 2).toUpperCase();
 
             return (
               <div
@@ -207,10 +421,16 @@ export function ClientProposalReview({
                     <Link
                       href={`/freelancers/${proposal.freelancer.id}`}
                       target="_blank"
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 font-extrabold text-sm dark:bg-emerald-950 dark:text-emerald-400 hover:scale-105 transition"
+                      className="shrink-0 hover:scale-105 transition"
                       title="View Freelancer Public Profile"
                     >
-                      {initials}
+                      <Avatar
+                        src={proposal.freelancer.image}
+                        name={freelancerDisplayName}
+                        role="FREELANCER"
+                        userId={proposal.freelancer.id}
+                        size="md"
+                      />
                     </Link>
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -327,50 +547,85 @@ export function ClientProposalReview({
                 <div className="mt-6 flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
                   {proposal.status === "PENDING" ? (
                     <>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        Evaluate this proposal carefully before taking action.
-                      </p>
+                      <div className="flex items-center gap-2">
+                        {/* Chat / Message Candidate Button */}
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => handleStartChat(proposal)}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-700 shadow-xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition disabled:opacity-50"
+                        >
+                          <span>💬</span>
+                          <span>{isProcessingThis ? "Opening Chat..." : "Chat Candidate"}</span>
+                        </button>
+
+                        {/* Send Interview Invitation Button */}
+                        {jobStatus === "OPEN" && (
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() => setInviteModalProposal(proposal)}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/70 px-3.5 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60 transition disabled:opacity-50"
+                          >
+                            <span>🤝</span>
+                            <span>Invite to Interview</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Decision Action Buttons */}
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
                           disabled={isPending}
-                          onClick={() => handleStatusChange(proposal.id, "REJECTED")}
+                          onClick={() => setDeclineModalProposal(proposal)}
                           className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:border-rose-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-rose-400 dark:hover:bg-rose-950/40 transition disabled:opacity-50"
                         >
-                          {isProcessingThis ? "Updating..." : "Decline"}
+                          Decline
                         </button>
                         <button
                           type="button"
                           disabled={isPending}
-                          onClick={() => handleStatusChange(proposal.id, "ACCEPTED")}
-                          className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow hover:bg-emerald-500 transition disabled:opacity-50"
+                          onClick={() => setHireModalProposal(proposal)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow hover:bg-emerald-500 transition disabled:opacity-50 active:scale-95"
                         >
-                          {isProcessingThis ? (
-                            <span className="flex items-center gap-1.5">
-                              <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                              Accepting...
-                            </span>
-                          ) : (
-                            "Accept Proposal"
-                          )}
+                          <span>Hire Freelancer</span>
+                          <span>→</span>
                         </button>
                       </div>
                     </>
                   ) : proposal.status === "ACCEPTED" ? (
-                    <div className="w-full rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
-                      <span className="font-semibold">
-                        ✓ Proposal accepted. Active Contract formed.
-                      </span>
-                      <Link
-                        href="/contracts"
-                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition"
-                      >
-                        View Contracts →
-                      </Link>
+                    <div className="w-full rounded-2xl bg-emerald-50 p-3.5 text-xs text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <span>✓</span>
+                        <span>Proposal accepted. Contract established.</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleStartChat(proposal)}
+                          className="rounded-lg border border-emerald-300 bg-white px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:bg-zinc-800 dark:text-emerald-300 transition"
+                        >
+                          Chat →
+                        </button>
+                        <Link
+                          href="/contracts"
+                          className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500 transition"
+                        >
+                          View Contracts →
+                        </Link>
+                      </div>
                     </div>
                   ) : (
-                    <div className="w-full rounded-xl bg-zinc-100 p-3 text-xs text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                      <span>Proposal declined. The freelancer has been notified.</span>
+                    <div className="w-full rounded-2xl bg-zinc-100 p-3.5 text-xs text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
+                      <span>Proposal declined. The candidate was notified.</span>
+                      <button
+                        type="button"
+                        onClick={() => handleStartChat(proposal)}
+                        className="text-xs font-semibold text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white underline"
+                      >
+                        Message History
+                      </button>
                     </div>
                   )}
                 </div>
@@ -378,6 +633,65 @@ export function ClientProposalReview({
             );
           })}
         </div>
+      )}
+
+      {/* Hire Freelancer Confirmation Modal */}
+      {hireModalProposal && (
+        <HireConfirmationModal
+          isOpen={Boolean(hireModalProposal)}
+          onClose={() => setHireModalProposal(null)}
+          onConfirm={handleConfirmHire}
+          isPending={isPending}
+          candidateName={
+            hireModalProposal.freelancer.name ||
+            (hireModalProposal.freelancer.email ? hireModalProposal.freelancer.email.split("@")[0] : "Freelancer")
+          }
+          candidateTitle={hireModalProposal.freelancer.title}
+          jobTitle={job.title}
+          bidAmount={hireModalProposal.bidAmount}
+          isHourly={isHourly}
+          estimatedDuration={hireModalProposal.estimatedDuration}
+        />
+      )}
+
+      {/* Send Interview Invitation Modal */}
+      {inviteModalProposal && (
+        <SendInvitationModal
+          isOpen={Boolean(inviteModalProposal)}
+          onClose={() => setInviteModalProposal(null)}
+          jobId={job.id}
+          jobTitle={job.title}
+          freelancerId={inviteModalProposal.freelancerId}
+          freelancerName={
+            inviteModalProposal.freelancer.name ||
+            (inviteModalProposal.freelancer.email ? inviteModalProposal.freelancer.email.split("@")[0] : "Freelancer")
+          }
+          onSuccess={(invitationId, conversationId) => {
+            setInviteModalProposal(null);
+            setSuccessToast({
+              message: "Interview invitation sent successfully! Discussion thread opened.",
+              link: `/messages?conversationId=${conversationId}`,
+              linkText: "Open Chat →",
+            });
+            router.refresh();
+          }}
+        />
+      )}
+
+      {/* Decline Proposal Confirmation Modal */}
+      {declineModalProposal && (
+        <DeclineReasonModal
+          isOpen={Boolean(declineModalProposal)}
+          onClose={() => setDeclineModalProposal(null)}
+          onConfirm={handleConfirmDecline}
+          isPending={isPending}
+          title="Decline Candidate Proposal"
+          description={`Are you sure you want to decline ${
+            declineModalProposal.freelancer.name || "this freelancer"
+          }'s proposal for "${job.title}"? This candidate will be notified.`}
+          confirmButtonLabel="Decline Proposal"
+          showReasonInput={false}
+        />
       )}
     </div>
   );

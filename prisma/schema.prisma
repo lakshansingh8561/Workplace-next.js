@@ -52,6 +52,8 @@ model Job {
   proposals             Proposal[]
   contract              Contract?
   savedBy               SavedJob[]
+  conversations         Conversation[]
+  interviewInvitations  InterviewInvitation[]
 
   // Client Snapshot
   clientName            String?
@@ -106,6 +108,7 @@ model User {
   passwordHash        String?
   role                Role       @default(CLIENT)
   roleSelected        Boolean    @default(true)
+  sessionVersion      Int        @default(1)
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
@@ -143,6 +146,8 @@ model User {
   timeEntries         TimeEntry[]    @relation("FreelancerTimeEntries")
   paymentsMade        Payment[]      @relation("PaymentsMade")
   paymentsReceived    Payment[]      @relation("PaymentsReceived")
+  sentInvitations     InterviewInvitation[] @relation("SentInvitations")
+  receivedInvitations InterviewInvitation[] @relation("ReceivedInvitations")
 
   @@map("users")
 }
@@ -187,6 +192,7 @@ model Contract {
   hourlyRate        Float?
   terms             String?
   status            ContractStatus      @default(ACTIVE)
+  lifecycleVersion  Int                 @default(1)
 
   startDate         DateTime            @default(now())
   endDate           DateTime?
@@ -216,6 +222,7 @@ model ContractMilestone {
   amount      Float
   dueDate     DateTime?
   status      MilestoneStatus @default(PENDING)
+  lifecycleVersion  Int             @default(1)
   isPaid      Boolean         @default(false)
   paidAt      DateTime?
   payments    Payment[]
@@ -227,25 +234,70 @@ model ContractMilestone {
   @@map("contract_milestones")
 }
 
+enum ConversationType {
+  PRE_HIRE
+  CONTRACT
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+  EXPIRED
+}
+
 model Conversation {
-  id           String    @id @default(auto()) @map("_id") @db.ObjectId
-  contractId   String    @unique @db.ObjectId
-  contract     Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  clientId     String    @db.ObjectId
-  client       User      @relation("ClientConversations", fields: [clientId], references: [id])
-  freelancerId String    @db.ObjectId
-  freelancer   User      @relation("FreelancerConversations", fields: [freelancerId], references: [id])
+  id                  String               @id @default(auto()) @map("_id") @db.ObjectId
+  type                ConversationType     @default(CONTRACT)
+  contractId          String?              @unique @db.ObjectId
+  contract            Contract?            @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  jobId               String?              @db.ObjectId
+  job                 Job?                 @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  clientId            String               @db.ObjectId
+  client              User                 @relation("ClientConversations", fields: [clientId], references: [id])
+  freelancerId        String               @db.ObjectId
+  freelancer          User                 @relation("FreelancerConversations", fields: [freelancerId], references: [id])
 
-  messages      Message[]
-  lastMessageAt DateTime  @default(now())
+  messages            Message[]
+  interviewInvitation InterviewInvitation?
+  lastMessageAt       DateTime             @default(now())
 
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
+  @@unique([jobId, freelancerId])
   @@index([clientId])
   @@index([freelancerId])
   @@index([lastMessageAt])
+  @@index([type])
   @@map("conversations")
+}
+
+model InterviewInvitation {
+  id             String           @id @default(auto()) @map("_id") @db.ObjectId
+  jobId          String           @db.ObjectId
+  job            Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  clientId       String           @db.ObjectId
+  client         User             @relation("SentInvitations", fields: [clientId], references: [id])
+  freelancerId   String           @db.ObjectId
+  freelancer     User             @relation("ReceivedInvitations", fields: [freelancerId], references: [id])
+  conversationId String           @unique @db.ObjectId
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  message        String
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  respondedAt    DateTime?
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([jobId, freelancerId])
+  @@index([freelancerId, status])
+  @@index([clientId, status])
+  @@index([jobId])
+  @@map("interview_invitations")
 }
 
 model Message {
@@ -269,6 +321,9 @@ enum NotificationType {
   MILESTONE_SUBMITTED
   MILESTONE_APPROVED
   CONTRACT_STATUS
+  INTERVIEW_INVITATION
+  INVITATION_ACCEPTED
+  INVITATION_DECLINED
 }
 
 model Notification {
@@ -279,7 +334,8 @@ model Notification {
   title     String
   message   String
   link      String?
-  read      Boolean          @default(false)
+  read           Boolean          @default(false)
+  idempotencyKey String?
   createdAt DateTime         @default(now())
 
   @@index([userId, read])
@@ -483,5 +539,40 @@ model Payment {
   @@index([milestoneId])
   @@index([status])
   @@map("payments")
+}
+
+model ActiveTimerReservation {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  freelancerId String   @unique @db.ObjectId
+  contractId   String   @db.ObjectId
+  timeEntryId  String?  @db.ObjectId
+  acquiredAt   DateTime @default(now())
+
+  @@index([contractId])
+  @@map("active_timer_reservations")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("email_verification_tokens")
 }
 

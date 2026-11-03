@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, verifyUserForAction } from "@/lib/session";
 import {
   ContractStatus,
   PaymentItemType,
@@ -85,11 +85,12 @@ export async function createMilestonePaymentOrderAction(
   }
 
   const { contractId, milestoneId } = parseResult.data;
-  const user = await getCurrentUser();
+  const authRes = await verifyUserForAction();
 
-  if (!user) {
-    return { success: false, error: "Authentication required to initiate payment." };
+  if (!authRes.success) {
+    return { success: false, error: authRes.error };
   }
+  const user = authRes.user;
 
   try {
     const milestone = await prisma.contractMilestone.findUnique({
@@ -204,20 +205,31 @@ export async function createMilestonePaymentOrderAction(
       },
     });
 
-    const payment = await prisma.payment.create({
-      data: {
-        contractId: milestone.contract.id,
-        payerId: user.id,
-        recipientId: milestone.contract.freelancerId,
-        itemType: PaymentItemType.MILESTONE,
-        milestoneId: milestone.id,
-        timeEntryIds: [],
-        amount,
-        currency,
-        amountSubunits,
-        razorpayOrderId: order.id,
-        status: PaymentStatus.PENDING,
-      },
+    const payment = await prisma.$transaction(async (tx) => {
+      // Coordinate through shared Contract document write lock
+      if (tx.contract?.update) {
+        await tx.contract.update({
+          where: { id: milestone.contract.id },
+          data: { updatedAt: new Date() },
+          select: { id: true },
+        });
+      }
+
+      return tx.payment.create({
+        data: {
+          contractId: milestone.contract.id,
+          payerId: user.id,
+          recipientId: milestone.contract.freelancerId,
+          itemType: PaymentItemType.MILESTONE,
+          milestoneId: milestone.id,
+          timeEntryIds: [],
+          amount,
+          currency,
+          amountSubunits,
+          razorpayOrderId: order.id,
+          status: PaymentStatus.PENDING,
+        },
+      });
     });
 
     return {
@@ -265,11 +277,12 @@ export async function createTimesheetPaymentOrderAction(
   }
 
   const { contractId, timeEntryIds } = parseResult.data;
-  const user = await getCurrentUser();
+  const authRes = await verifyUserForAction();
 
-  if (!user) {
-    return { success: false, error: "Authentication required to initiate payment." };
+  if (!authRes.success) {
+    return { success: false, error: authRes.error };
   }
+  const user = authRes.user;
 
   try {
     const contract = await prisma.contract.findUnique({
@@ -400,20 +413,31 @@ export async function createTimesheetPaymentOrderAction(
       },
     });
 
-    const payment = await prisma.payment.create({
-      data: {
-        contractId: contract.id,
-        payerId: user.id,
-        recipientId: contract.freelancerId,
-        itemType: PaymentItemType.HOURLY_TIMESHEET,
-        milestoneId: null,
-        timeEntryIds,
-        amount: totalAmount,
-        currency,
-        amountSubunits,
-        razorpayOrderId: order.id,
-        status: PaymentStatus.PENDING,
-      },
+    const payment = await prisma.$transaction(async (tx) => {
+      // Coordinate through shared Contract document write lock
+      if (tx.contract?.update) {
+        await tx.contract.update({
+          where: { id: contract.id },
+          data: { updatedAt: new Date() },
+          select: { id: true },
+        });
+      }
+
+      return tx.payment.create({
+        data: {
+          contractId: contract.id,
+          payerId: user.id,
+          recipientId: contract.freelancerId,
+          itemType: PaymentItemType.HOURLY_TIMESHEET,
+          milestoneId: null,
+          timeEntryIds,
+          amount: totalAmount,
+          currency,
+          amountSubunits,
+          razorpayOrderId: order.id,
+          status: PaymentStatus.PENDING,
+        },
+      });
     });
 
     return {
@@ -514,6 +538,15 @@ export async function verifyPaymentSignatureAction(
 
     // Settle payment and update billable items
     await prisma.$transaction(async (tx) => {
+      // Coordinate through shared Contract document write lock
+      if (tx.contract?.update) {
+        await tx.contract.update({
+          where: { id: payment.contractId },
+          data: { updatedAt: new Date() },
+          select: { id: true },
+        });
+      }
+
       await tx.payment.update({
         where: { id: payment.id },
         data: {
