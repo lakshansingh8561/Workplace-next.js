@@ -21,8 +21,18 @@ async function FreelancersContent({ searchParams }: FreelancersPageProps) {
   const query = typeof resolved.query === "string" ? resolved.query : undefined;
   const skill = typeof resolved.skill === "string" ? resolved.skill : undefined;
   const experience = typeof resolved.experience === "string" ? resolved.experience : undefined;
+  const minRate =
+    typeof resolved.minRate === "string" ? parseFloat(resolved.minRate) : undefined;
   const maxRate =
     typeof resolved.maxRate === "string" ? parseFloat(resolved.maxRate) : undefined;
+  const isAvailable =
+    resolved.isAvailable === "true"
+      ? true
+      : resolved.isAvailable === "false"
+      ? false
+      : undefined;
+  const minRating =
+    typeof resolved.minRating === "string" ? parseFloat(resolved.minRating) : undefined;
   const sort =
     resolved.sort === "rate_asc" ||
     resolved.sort === "rate_desc" ||
@@ -36,7 +46,10 @@ async function FreelancersContent({ searchParams }: FreelancersPageProps) {
     query,
     skill,
     experience,
+    minRate: isNaN(minRate ?? NaN) ? undefined : minRate,
     maxRate: isNaN(maxRate ?? NaN) ? undefined : maxRate,
+    isAvailable,
+    minRating: isNaN(minRating ?? NaN) ? undefined : minRating,
     sort,
     page: isNaN(page) ? 1 : page,
     limit: 12,

@@ -15,6 +15,193 @@ export function isSafeHttpUrl(url: string | null | undefined): boolean {
   }
 }
 
+export const PortfolioProjectSchema = z.object({
+  id: z.string().optional(),
+  title: z
+    .string()
+    .trim()
+    .min(2, "Project title must be at least 2 characters")
+    .max(100, "Project title cannot exceed 100 characters"),
+  description: z
+    .string()
+    .trim()
+    .max(1000, "Project description cannot exceed 1000 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  projectUrl: z
+    .string()
+    .trim()
+    .max(250, "Project link cannot exceed 250 characters")
+    .refine(
+      (val) => !val || isSafeHttpUrl(val),
+      { message: "Project link must use a valid web protocol (http:// or https://)" }
+    )
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  imageUrl: z
+    .string()
+    .trim()
+    .max(250, "Project image URL cannot exceed 250 characters")
+    .refine(
+      (val) => !val || isSafeHttpUrl(val),
+      { message: "Project image URL must use a valid web protocol (http:// or https://)" }
+    )
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  skills: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1, "Skill name cannot be empty")
+        .max(40, "Skill name cannot exceed 40 characters")
+    )
+    .max(15, "You can specify up to 15 skills per project")
+    .default([]),
+});
+
+export type PortfolioProjectInput = z.infer<typeof PortfolioProjectSchema>;
+
+export const EmploymentHistorySchema = z.object({
+  id: z.string().optional(),
+  company: z
+    .string()
+    .trim()
+    .min(1, "Company name is required")
+    .max(100, "Company name cannot exceed 100 characters"),
+  position: z
+    .string()
+    .trim()
+    .min(1, "Position or job title is required")
+    .max(100, "Position cannot exceed 100 characters"),
+  location: z
+    .string()
+    .trim()
+    .max(80, "Location cannot exceed 80 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  startDate: z
+    .string()
+    .trim()
+    .min(1, "Start date is required")
+    .max(40, "Start date cannot exceed 40 characters"),
+  endDate: z
+    .string()
+    .trim()
+    .max(40, "End date cannot exceed 40 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  current: z.boolean().default(false),
+  description: z
+    .string()
+    .trim()
+    .max(1000, "Description cannot exceed 1000 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+});
+
+export type EmploymentHistoryInput = z.infer<typeof EmploymentHistorySchema>;
+
+export const EducationHistorySchema = z.object({
+  id: z.string().optional(),
+  institution: z
+    .string()
+    .trim()
+    .min(1, "School or university name is required")
+    .max(120, "Institution name cannot exceed 120 characters"),
+  degree: z
+    .string()
+    .trim()
+    .max(100, "Degree cannot exceed 100 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  fieldOfStudy: z
+    .string()
+    .trim()
+    .max(100, "Field of study cannot exceed 100 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  startYear: z
+    .string()
+    .trim()
+    .max(20, "Start year cannot exceed 20 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  endYear: z
+    .string()
+    .trim()
+    .max(20, "End year cannot exceed 20 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  description: z
+    .string()
+    .trim()
+    .max(500, "Description cannot exceed 500 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+});
+
+export type EducationHistoryInput = z.infer<typeof EducationHistorySchema>;
+
+export const CertificationSchema = z.object({
+  id: z.string().optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Certification name is required")
+    .max(120, "Certification name cannot exceed 120 characters"),
+  issuer: z
+    .string()
+    .trim()
+    .min(1, "Issuing organization is required")
+    .max(100, "Issuer cannot exceed 100 characters"),
+  issueDate: z
+    .string()
+    .trim()
+    .max(40, "Issue date cannot exceed 40 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  expiryDate: z
+    .string()
+    .trim()
+    .max(40, "Expiry date cannot exceed 40 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  credentialId: z
+    .string()
+    .trim()
+    .max(80, "Credential ID cannot exceed 80 characters")
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  credentialUrl: z
+    .string()
+    .trim()
+    .max(250, "Credential URL cannot exceed 250 characters")
+    .refine(
+      (val) => !val || isSafeHttpUrl(val),
+      { message: "Credential URL must use a valid web protocol (http:// or https://)" }
+    )
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+});
+
+export type CertificationInput = z.infer<typeof CertificationSchema>;
+
 export const FreelancerProfileSchema = z.object({
   name: z
     .string()
@@ -84,8 +271,14 @@ export const FreelancerProfileSchema = z.object({
           { message: "Portfolio link must use a valid web protocol (http:// or https://)" }
         )
     )
-    .max(5, "You can add up to 5 portfolio/project links")
+    .max(10, "You can add up to 10 portfolio links")
     .default([]),
+  isAvailable: z.boolean().default(true),
+  visibility: z.enum(["PUBLIC", "PRIVATE"]).default("PUBLIC"),
+  portfolioProjects: z.array(PortfolioProjectSchema).max(10).default([]),
+  employmentHistory: z.array(EmploymentHistorySchema).max(15).default([]),
+  educationHistory: z.array(EducationHistorySchema).max(10).default([]),
+  certifications: z.array(CertificationSchema).max(10).default([]),
 });
 
 export type FreelancerProfileInput = z.infer<typeof FreelancerProfileSchema>;
@@ -146,30 +339,34 @@ export function calculateFreelancerProfileCompletion(profile: {
   location?: string | null;
   languages?: string[] | null;
   portfolioUrls?: string[] | null;
+  portfolioProjects?: Array<{ title?: string }> | null;
+  employmentHistory?: Array<{ company?: string }> | null;
+  educationHistory?: Array<{ institution?: string }> | null;
+  certifications?: Array<{ name?: string }> | null;
 }): { score: number; missing: string[] } {
   let score = 0;
   const missing: string[] = [];
 
   if (profile.name && profile.name.trim().length >= 2) {
-    score += 15;
+    score += 10;
   } else {
     missing.push("Display Name");
   }
 
   if (profile.title && profile.title.trim().length >= 3) {
-    score += 15;
+    score += 10;
   } else {
     missing.push("Professional Title");
   }
 
   if (profile.bio && profile.bio.trim().length >= 20) {
-    score += 20;
+    score += 15;
   } else {
     missing.push("Professional Overview (min 20 characters)");
   }
 
   if (profile.skills && profile.skills.length > 0) {
-    score += 20;
+    score += 15;
   } else {
     missing.push("Key Skills (at least 1)");
   }
@@ -192,10 +389,28 @@ export function calculateFreelancerProfileCompletion(profile: {
     missing.push("Languages");
   }
 
-  if (profile.portfolioUrls && profile.portfolioUrls.length > 0) {
+  const hasPortfolio =
+    (profile.portfolioProjects && profile.portfolioProjects.length > 0) ||
+    (profile.portfolioUrls && profile.portfolioUrls.length > 0);
+  if (hasPortfolio) {
+    score += 10;
+  } else {
+    missing.push("Portfolio Project or Link");
+  }
+
+  if (profile.employmentHistory && profile.employmentHistory.length > 0) {
+    score += 10;
+  } else {
+    missing.push("Employment History");
+  }
+
+  const hasEducationOrCert =
+    (profile.educationHistory && profile.educationHistory.length > 0) ||
+    (profile.certifications && profile.certifications.length > 0);
+  if (hasEducationOrCert) {
     score += 5;
   } else {
-    missing.push("Portfolio / Project Links");
+    missing.push("Education or Certification");
   }
 
   return { score: Math.min(100, score), missing };

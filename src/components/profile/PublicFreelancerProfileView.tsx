@@ -36,12 +36,43 @@ export function PublicFreelancerProfileView({
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
+  // Private profile check: If not owner and profile is private, show clean restricted state
+  if (profile.visibility === "PRIVATE" && !isOwner) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-16 text-center">
+        <div className="rounded-3xl border border-zinc-200 bg-white p-12 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-100 text-3xl dark:bg-zinc-800">
+            🔒
+          </div>
+          <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white">
+            {displayName}&apos;s Profile is Private
+          </h1>
+          <p className="mt-2 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 max-w-md mx-auto">
+            This freelancer has set their profile visibility to Private. Only the owner can view this profile.
+          </p>
+          <div className="mt-6">
+            <Link
+              href="/freelancers"
+              className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 transition"
+            >
+              Browse Other Freelancers
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const hasDetails = Boolean(
     profile.title ||
       profile.bio ||
-      profile.skills.length > 0 ||
+      (profile.skills && profile.skills.length > 0) ||
       profile.hourlyRate ||
-      profile.portfolioUrls.length > 0
+      (profile.portfolioUrls && profile.portfolioUrls.length > 0) ||
+      (profile.portfolioProjects && profile.portfolioProjects.length > 0) ||
+      (profile.employmentHistory && profile.employmentHistory.length > 0) ||
+      (profile.educationHistory && profile.educationHistory.length > 0) ||
+      (profile.certifications && profile.certifications.length > 0)
   );
 
   const handleStartDirectChat = async () => {
@@ -68,7 +99,25 @@ export function PublicFreelancerProfileView({
 
   return (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
-      {/* Top Navigation & Owner Banner */}
+      {/* Private Profile Banner for Owner */}
+      {isOwner && profile.visibility === "PRIVATE" && (
+        <div className="mb-6 rounded-2xl bg-amber-50 p-4 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 text-xs sm:text-sm font-semibold text-amber-800 dark:text-amber-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>🔒</span>
+            <span>
+              Your profile is currently <strong>Private</strong>. Only you can view it. Switch to Public in Settings to appear in client search results.
+            </span>
+          </div>
+          <Link
+            href="/profile/freelancer"
+            className="underline hover:text-amber-900 dark:hover:text-amber-200 text-xs"
+          >
+            Edit Settings
+          </Link>
+        </div>
+      )}
+
+      {/* Top Navigation & Owner Actions */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <Link
           href="/freelancers"
@@ -124,6 +173,21 @@ export function PublicFreelancerProfileView({
                 <span>{profile.location}</span>
               </p>
             )}
+
+            {/* Availability Badge */}
+            <div className="mt-3 flex items-center justify-center">
+              {profile.isAvailable !== false ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Available for work
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                  <span className="h-2 w-2 rounded-full bg-zinc-400" />
+                  Currently busy
+                </span>
+              )}
+            </div>
 
             <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800 grid grid-cols-2 gap-4 text-center">
               <div>
@@ -226,7 +290,7 @@ export function PublicFreelancerProfileView({
           </div>
 
           {/* Languages Sidebar */}
-          {profile.languages.length > 0 && (
+          {profile.languages && profile.languages.length > 0 && (
             <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
               <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 pb-3 border-b border-zinc-100 dark:border-zinc-800">
                 Languages
@@ -242,8 +306,8 @@ export function PublicFreelancerProfileView({
             </div>
           )}
 
-          {/* Portfolio & External Links */}
-          {profile.portfolioUrls.length > 0 && (
+          {/* External Portfolio Links */}
+          {profile.portfolioUrls && profile.portfolioUrls.length > 0 && (
             <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
               <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 pb-3 border-b border-zinc-100 dark:border-zinc-800">
                 Project & Portfolio Links
@@ -285,7 +349,7 @@ export function PublicFreelancerProfileView({
           )}
         </div>
 
-        {/* Right 2 Columns: Overview, Experience, Skills & Client Reviews */}
+        {/* Right 2 Columns: Overview, Projects, Work History, Education, Certifications & Reviews */}
         <div className="lg:col-span-2 space-y-6">
           {!hasDetails ? (
             <div className="rounded-3xl border border-zinc-200 bg-white p-12 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -296,7 +360,7 @@ export function PublicFreelancerProfileView({
                 Profile Setup In Progress
               </h3>
               <p className="mt-2 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 max-w-md mx-auto">
-                This freelancer hasn&apos;t added an overview, verified skills, or portfolio links yet.
+                This freelancer hasn&apos;t added an overview, verified skills, or portfolio projects yet.
               </p>
               {isOwner && (
                 <div className="mt-6">
@@ -325,12 +389,91 @@ export function PublicFreelancerProfileView({
                 )}
               </div>
 
-              {/* Skills */}
+              {/* Phase 5: Rich Portfolio Projects Showcase */}
+              {profile.portfolioProjects && profile.portfolioProjects.length > 0 && (
+                <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 sm:p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
+                  <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                    <h2 className="text-base font-bold text-zinc-950 dark:text-white">
+                      Portfolio Projects
+                    </h2>
+                    <span className="text-xs font-semibold text-zinc-400">
+                      {profile.portfolioProjects.length} featured project{profile.portfolioProjects.length > 1 ? "s" : ""}
+                    </span>
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {profile.portfolioProjects.map((project) => {
+                      const isSafeUrl = isSafeHttpUrl(project.projectUrl);
+                      const isSafeImg = isSafeHttpUrl(project.imageUrl);
+
+                      return (
+                        <div
+                          key={project.id}
+                          className="flex flex-col justify-between rounded-2xl border border-zinc-200/80 bg-zinc-50/50 p-5 dark:border-zinc-800 dark:bg-zinc-900/60 transition hover:shadow-md"
+                        >
+                          <div>
+                            {/* Project Thumbnail */}
+                            {isSafeImg && project.imageUrl && (
+                              <div className="mb-3 overflow-hidden rounded-xl bg-zinc-200 dark:bg-zinc-800 aspect-video">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={project.imageUrl}
+                                  alt={project.title}
+                                  className="h-full w-full object-cover"
+                                />
+                              </div>
+                            )}
+
+                            <div className="flex items-start justify-between gap-2">
+                              <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                                {project.title}
+                              </h3>
+                              {isSafeUrl && project.projectUrl && (
+                                <a
+                                  href={project.projectUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs font-bold text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 hover:underline"
+                                  title="View Live Project"
+                                >
+                                  Demo ↗
+                                </a>
+                              )}
+                            </div>
+
+                            {project.description && (
+                              <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400 line-clamp-3 leading-relaxed">
+                                {project.description}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Project Skills */}
+                          {project.skills && project.skills.length > 0 && (
+                            <div className="mt-4 pt-3 border-t border-zinc-200/60 dark:border-zinc-800 flex flex-wrap gap-1.5">
+                              {project.skills.map((s) => (
+                                <span
+                                  key={s}
+                                  className="rounded-lg bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 border border-zinc-200/80 dark:border-zinc-700"
+                                >
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Skills & Expertise */}
               <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 sm:p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
                 <h2 className="text-base font-bold text-zinc-950 dark:text-white pb-3 border-b border-zinc-100 dark:border-zinc-800">
                   Skills & Expertise
                 </h2>
-                {profile.skills.length > 0 ? (
+                {profile.skills && profile.skills.length > 0 ? (
                   <div className="mt-4 flex flex-wrap gap-2">
                     {profile.skills.map((skill) => (
                       <span
@@ -346,11 +489,148 @@ export function PublicFreelancerProfileView({
                 )}
               </div>
 
-              {/* Experience */}
+              {/* Phase 5: Work & Employment History */}
+              {profile.employmentHistory && profile.employmentHistory.length > 0 && (
+                <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 sm:p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
+                  <h2 className="text-base font-bold text-zinc-950 dark:text-white pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                    Employment History
+                  </h2>
+
+                  <div className="mt-6 space-y-6">
+                    {profile.employmentHistory.map((item) => (
+                      <div
+                        key={item.id}
+                        className="relative pl-6 border-l-2 border-emerald-500 dark:border-emerald-600 space-y-1.5"
+                      >
+                        <div className="absolute -left-[5px] top-1.5 h-2 w-2 rounded-full bg-emerald-600" />
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                            {item.position}
+                          </h3>
+                          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                            {item.startDate} – {item.current ? "Present" : item.endDate || "Present"}
+                          </span>
+                        </div>
+                        <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+                          {item.company} {item.location ? `• ${item.location}` : ""}
+                        </p>
+                        {item.description && (
+                          <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400 whitespace-pre-line leading-relaxed">
+                            {item.description}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Phase 5: Education History */}
+              {profile.educationHistory && profile.educationHistory.length > 0 && (
+                <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 sm:p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
+                  <h2 className="text-base font-bold text-zinc-950 dark:text-white pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                    Education & Degrees
+                  </h2>
+
+                  <div className="mt-6 space-y-4">
+                    {profile.educationHistory.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl border border-zinc-200/80 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                            {item.institution}
+                          </h3>
+                          {(item.startYear || item.endYear) && (
+                            <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                              {item.startYear ? item.startYear : ""}
+                              {item.startYear && item.endYear ? " – " : ""}
+                              {item.endYear ? item.endYear : ""}
+                            </span>
+                          )}
+                        </div>
+                        {(item.degree || item.fieldOfStudy) && (
+                          <p className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                            {item.degree}
+                            {item.degree && item.fieldOfStudy ? " in " : ""}
+                            {item.fieldOfStudy}
+                          </p>
+                        )}
+                        {item.description && (
+                          <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+                            {item.description}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Phase 5: Certifications & Credentials */}
+              {profile.certifications && profile.certifications.length > 0 && (
+                <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 sm:p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
+                  <h2 className="text-base font-bold text-zinc-950 dark:text-white pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                    Certifications & Credentials
+                  </h2>
+
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {profile.certifications.map((item) => {
+                      const isSafeCertUrl = isSafeHttpUrl(item.credentialUrl);
+
+                      return (
+                        <div
+                          key={item.id}
+                          className="rounded-2xl border border-zinc-200/80 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60 flex flex-col justify-between"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">🏅</span>
+                              <h3 className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-white">
+                                {item.name}
+                              </h3>
+                            </div>
+                            <p className="mt-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                              {item.issuer}
+                            </p>
+                            {(item.issueDate || item.expiryDate) && (
+                              <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                Issued: {item.issueDate || "N/A"}
+                                {item.expiryDate ? ` • Expires: ${item.expiryDate}` : ""}
+                              </p>
+                            )}
+                            {item.credentialId && (
+                              <p className="mt-0.5 text-[10px] text-zinc-400 font-mono">
+                                ID: {item.credentialId}
+                              </p>
+                            )}
+                          </div>
+
+                          {isSafeCertUrl && item.credentialUrl && (
+                            <div className="mt-3 pt-2 border-t border-zinc-200/60 dark:border-zinc-800">
+                              <a
+                                href={item.credentialUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs font-bold text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 hover:underline"
+                              >
+                                Verify Credential ↗
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Experience Summary (if specified) */}
               {profile.experience && (
                 <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 sm:p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90">
                   <h2 className="text-base font-bold text-zinc-950 dark:text-white pb-3 border-b border-zinc-100 dark:border-zinc-800">
-                    Experience & Background
+                    Experience Highlights
                   </h2>
                   <p className="mt-4 text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-medium">
                     {profile.experience}

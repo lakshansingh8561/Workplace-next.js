@@ -17,6 +17,7 @@ export interface PublicFreelancerCardData {
   completedContractsCount: number;
   averageRating: number | null;
   totalReviews: number;
+  isAvailable: boolean;
   createdAt: string;
 }
 
@@ -26,6 +27,8 @@ export interface SearchFreelancersOptions {
   minRate?: number;
   maxRate?: number;
   experience?: string;
+  isAvailable?: boolean;
+  minRating?: number;
   sort?: "rating" | "rate_asc" | "rate_desc" | "recent";
   page?: number;
   limit?: number;
@@ -43,7 +46,7 @@ export interface SearchFreelancersResult {
 
 /**
  * Searches and paginates public freelancer profiles for client discovery.
- * Strictly enforces public privacy: excludes email, credentials, and private financial records.
+ * Strictly enforces public privacy: excludes private profiles, emails, credentials, and private records.
  */
 export async function searchFreelancersAction(
   options?: SearchFreelancersOptions
@@ -55,18 +58,40 @@ export async function searchFreelancersAction(
 
     const query = options?.query?.trim();
     const skill = options?.skill?.trim();
-    const minRate = options?.minRate !== undefined ? Number(options.minRate) : undefined;
-    const maxRate = options?.maxRate !== undefined ? Number(options.maxRate) : undefined;
+    let minRate =
+      options?.minRate !== undefined && !isNaN(Number(options.minRate))
+        ? Math.max(0, Number(options.minRate))
+        : undefined;
+    let maxRate =
+      options?.maxRate !== undefined && !isNaN(Number(options.maxRate))
+        ? Math.max(0, Number(options.maxRate))
+        : undefined;
+
+    if (minRate !== undefined && maxRate !== undefined && minRate > maxRate) {
+      const temp = minRate;
+      minRate = maxRate;
+      maxRate = temp;
+    }
+
     const experience = options?.experience?.trim();
+    const isAvailable = options?.isAvailable;
+    const minRating =
+      options?.minRating !== undefined && !isNaN(Number(options.minRating))
+        ? Math.max(0, Number(options.minRating))
+        : undefined;
     const sort = options?.sort || "rating";
 
-    // Build Prisma filter
+    // Build Prisma filter: Always restrict to active, public freelancers
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {
       role: "FREELANCER",
       roleSelected: true,
+      NOT: {
+        visibility: "PRIVATE",
+      },
     };
 
+    // Keyword search across Name, Title, Bio, and Skills
     if (query) {
       where.OR = [
         { name: { contains: query, mode: "insensitive" } },
@@ -76,25 +101,48 @@ export async function searchFreelancersAction(
       ];
     }
 
+    // Skill filter
     if (skill && skill !== "ALL") {
       where.skills = { has: skill };
     }
 
+    // Experience filter
     if (experience && experience !== "ALL") {
       where.experience = { contains: experience, mode: "insensitive" };
     }
 
+    // Availability filter (Phase 5 isAvailable integration)
+    if (isAvailable !== undefined) {
+      where.isAvailable = isAvailable;
+    }
+
+    // Hourly rate range filtering
     if (minRate !== undefined || maxRate !== undefined) {
       where.hourlyRate = {};
-      if (minRate !== undefined && !isNaN(minRate)) {
+      if (minRate !== undefined) {
         where.hourlyRate.gte = minRate;
       }
-      if (maxRate !== undefined && !isNaN(maxRate)) {
+      if (maxRate !== undefined) {
         where.hourlyRate.lte = maxRate;
       }
     }
 
-    // Determine sorting
+    // Rating filtering using verified client reviews
+    if (minRating !== undefined && minRating > 0) {
+      const allReviewStats = await prisma.review.groupBy({
+        by: ["revieweeId"],
+        _avg: { rating: true },
+        _count: { _all: true },
+      });
+
+      const qualifyingIds = (allReviewStats || [])
+        .filter((r) => (r._avg?.rating ?? 0) >= minRating)
+        .map((r) => r.revieweeId);
+
+      where.id = { in: qualifyingIds };
+    }
+
+    // Standard Prisma orderBy
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let orderBy: any = [{ createdAt: "desc" }];
     if (sort === "rate_asc") {
@@ -119,6 +167,7 @@ export async function searchFreelancersAction(
           experience: true,
           location: true,
           portfolioUrls: true,
+          isAvailable: true,
           createdAt: true,
           _count: {
             select: {
@@ -133,15 +182,15 @@ export async function searchFreelancersAction(
       }),
       prisma.user.count({ where }),
       prisma.user.findMany({
-        where: { role: "FREELANCER" },
+        where: { role: "FREELANCER", NOT: { visibility: "PRIVATE" } },
         select: { skills: true },
         take: 100,
       }),
     ]);
 
-    // Extract top skills for quick filtering
+    // Top skills query: Sample skills across public freelancers for filter pills
     const skillCountMap = new Map<string, number>();
-    allUsersSkills.forEach((u) => {
+    (allUsersSkills || []).forEach((u) => {
       u.skills?.forEach((s) => {
         const clean = s.trim();
         if (clean) {
@@ -155,9 +204,9 @@ export async function searchFreelancersAction(
       .slice(0, 15)
       .map(([s]) => s);
 
-    // Fetch review ratings & completed contracts
-    const freelancerIds = rawFreelancers.map((f) => f.id);
-    let ratingMap = new Map<string, { avg: number; count: number }>();
+    // Fetch review ratings for the displayed freelancers on this page
+    const freelancerIds = (rawFreelancers || []).map((f) => f.id);
+    let ratingMap = new Map<string, { avg: number | null; count: number }>();
 
     if (freelancerIds.length > 0) {
       const reviewStats = await prisma.review.groupBy({
@@ -170,18 +219,21 @@ export async function searchFreelancersAction(
       });
 
       ratingMap = new Map(
-        reviewStats.map((r) => [
+        (reviewStats || []).map((r) => [
           r.revieweeId,
           {
-            avg: r._avg.rating ? Math.round(r._avg.rating * 10) / 10 : 5.0,
-            count: r._count._all,
+            avg: r._avg?.rating ? Math.round(r._avg.rating * 10) / 10 : null,
+            count: r._count?._all || 0,
           },
         ])
       );
     }
 
-    const freelancers: PublicFreelancerCardData[] = rawFreelancers.map((f) => {
-      const stats = ratingMap.get(f.id) || { avg: 5.0, count: f._count.reviewsReceived };
+    const freelancers: PublicFreelancerCardData[] = (rawFreelancers || []).map((f) => {
+      const stats = ratingMap.get(f.id) || {
+        avg: null,
+        count: f._count?.reviewsReceived || 0,
+      };
       const avatarUrl = getDeterministicAvatar(
         {
           id: f.id,
@@ -203,16 +255,22 @@ export async function searchFreelancersAction(
         location: f.location || null,
         image: avatarUrl,
         portfolioUrls: f.portfolioUrls || [],
-        completedContractsCount: f._count.freelancerContracts,
+        completedContractsCount: f._count?.freelancerContracts || 0,
         averageRating: stats.avg,
         totalReviews: stats.count,
+        isAvailable: f.isAvailable ?? true,
         createdAt: f.createdAt.toISOString(),
       };
     });
 
-    // If sorting by rating, sort in memory
+    // If sorting by rating, sort displayed items by rating descending
     if (sort === "rating") {
-      freelancers.sort((a, b) => (b.averageRating ?? 0) - (a.averageRating ?? 0));
+      freelancers.sort((a, b) => {
+        const ratingA = a.averageRating ?? 0;
+        const ratingB = b.averageRating ?? 0;
+        if (ratingB !== ratingA) return ratingB - ratingA;
+        return (b.totalReviews ?? 0) - (a.totalReviews ?? 0);
+      });
     }
 
     return {
@@ -236,4 +294,3 @@ export async function searchFreelancersAction(
     };
   }
 }
-

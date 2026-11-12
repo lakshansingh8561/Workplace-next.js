@@ -25,6 +25,13 @@ export async function generateMetadata({
     };
   }
 
+  if (profile.visibility === "PRIVATE") {
+    return {
+      title: "Private Profile | WorkPulse",
+      description: "This freelancer profile is private.",
+    };
+  }
+
   const name = profile.name || "Freelancer";
   const title = profile.title ? ` - ${profile.title}` : "";
 

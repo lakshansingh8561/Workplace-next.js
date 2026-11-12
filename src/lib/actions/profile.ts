@@ -72,7 +72,19 @@ export async function updateFreelancerProfileAction(
     location,
     languages,
     portfolioUrls,
+    isAvailable,
+    visibility,
+    portfolioProjects,
+    employmentHistory,
+    educationHistory,
+    certifications,
   } = parsed.data;
+
+  const explicitUrls = (portfolioUrls || []).map((u) => u.trim()).filter(Boolean);
+  const projectUrls = (portfolioProjects || [])
+    .map((p) => p.projectUrl?.trim())
+    .filter((u): u is string => Boolean(u));
+  const combinedPortfolioUrls = Array.from(new Set([...explicitUrls, ...projectUrls])).slice(0, 10);
 
   try {
     const updated = await prisma.user.update({
@@ -86,7 +98,45 @@ export async function updateFreelancerProfileAction(
         experience: experience || null,
         location: location || null,
         languages,
-        portfolioUrls,
+        portfolioUrls: combinedPortfolioUrls,
+        isAvailable: isAvailable ?? true,
+        visibility: visibility || "PUBLIC",
+        portfolioProjects: (portfolioProjects || []).map((p) => ({
+          id: p.id || crypto.randomUUID(),
+          title: p.title,
+          description: p.description || null,
+          projectUrl: p.projectUrl || null,
+          imageUrl: p.imageUrl || null,
+          skills: p.skills || [],
+        })),
+        employmentHistory: (employmentHistory || []).map((e) => ({
+          id: e.id || crypto.randomUUID(),
+          company: e.company,
+          position: e.position,
+          location: e.location || null,
+          startDate: e.startDate,
+          endDate: e.current ? null : e.endDate || null,
+          current: Boolean(e.current),
+          description: e.description || null,
+        })),
+        educationHistory: (educationHistory || []).map((ed) => ({
+          id: ed.id || crypto.randomUUID(),
+          institution: ed.institution,
+          degree: ed.degree || null,
+          fieldOfStudy: ed.fieldOfStudy || null,
+          startYear: ed.startYear || null,
+          endYear: ed.endYear || null,
+          description: ed.description || null,
+        })),
+        certifications: (certifications || []).map((c) => ({
+          id: c.id || crypto.randomUUID(),
+          name: c.name,
+          issuer: c.issuer,
+          issueDate: c.issueDate || null,
+          expiryDate: c.expiryDate || null,
+          credentialId: c.credentialId || null,
+          credentialUrl: c.credentialUrl || null,
+        })),
       },
       select: {
         id: true,
@@ -101,6 +151,12 @@ export async function updateFreelancerProfileAction(
         location: true,
         languages: true,
         portfolioUrls: true,
+        isAvailable: true,
+        visibility: true,
+        portfolioProjects: true,
+        employmentHistory: true,
+        educationHistory: true,
+        certifications: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -111,6 +167,7 @@ export async function updateFreelancerProfileAction(
     revalidatePath("/dashboard/freelancer");
     revalidatePath("/profile/freelancer");
     revalidatePath(`/freelancers/${sessionUser.id}`);
+    revalidatePath("/freelancers");
     revalidatePath("/jobs");
 
     return {
@@ -235,35 +292,74 @@ export async function getFreelancerPublicProfile(
   }
 
   try {
-    const user = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        role: "FREELANCER",
-      },
-      select: {
-        id: true,
-        name: true,
-        image: true,
-        role: true,
-        title: true,
-        bio: true,
-        skills: true,
-        hourlyRate: true,
-        experience: true,
-        location: true,
-        languages: true,
-        portfolioUrls: true,
-        createdAt: true,
-        _count: {
-          select: {
-            freelancerContracts: true,
+    const [user, currentUser] = await Promise.all([
+      prisma.user.findFirst({
+        where: {
+          id: userId,
+          role: "FREELANCER",
+        },
+        select: {
+          id: true,
+          name: true,
+          image: true,
+          role: true,
+          title: true,
+          bio: true,
+          skills: true,
+          hourlyRate: true,
+          experience: true,
+          location: true,
+          languages: true,
+          portfolioUrls: true,
+          isAvailable: true,
+          visibility: true,
+          portfolioProjects: true,
+          employmentHistory: true,
+          educationHistory: true,
+          certifications: true,
+          createdAt: true,
+          _count: {
+            select: {
+              freelancerContracts: true,
+            },
           },
         },
-      },
-    });
+      }),
+      getCurrentUser(),
+    ]);
 
     if (!user) {
       return null;
+    }
+
+    const isOwner = currentUser?.id === user.id;
+
+    // If profile is set to PRIVATE and visitor is not the owner, hide detailed content
+    if (user.visibility === "PRIVATE" && !isOwner) {
+      return {
+        id: user.id,
+        name: user.name || "Freelancer",
+        image: null,
+        role: user.role,
+        title: null,
+        bio: null,
+        skills: [],
+        hourlyRate: null,
+        experience: null,
+        location: null,
+        languages: [],
+        portfolioUrls: [],
+        isAvailable: false,
+        visibility: "PRIVATE",
+        portfolioProjects: [],
+        employmentHistory: [],
+        educationHistory: [],
+        certifications: [],
+        createdAt: user.createdAt.toISOString(),
+        _count: {
+          freelancerContracts: 0,
+        },
+      };
     }
 
     return {
@@ -279,6 +375,44 @@ export async function getFreelancerPublicProfile(
       location: user.location,
       languages: user.languages || [],
       portfolioUrls: user.portfolioUrls || [],
+      isAvailable: user.isAvailable ?? true,
+      visibility: user.visibility || "PUBLIC",
+      portfolioProjects: (user.portfolioProjects || []).map((p) => ({
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        projectUrl: p.projectUrl,
+        imageUrl: p.imageUrl,
+        skills: p.skills || [],
+      })),
+      employmentHistory: (user.employmentHistory || []).map((e) => ({
+        id: e.id,
+        company: e.company,
+        position: e.position,
+        location: e.location,
+        startDate: e.startDate,
+        endDate: e.endDate,
+        current: Boolean(e.current),
+        description: e.description,
+      })),
+      educationHistory: (user.educationHistory || []).map((ed) => ({
+        id: ed.id,
+        institution: ed.institution,
+        degree: ed.degree,
+        fieldOfStudy: ed.fieldOfStudy,
+        startYear: ed.startYear,
+        endYear: ed.endYear,
+        description: ed.description,
+      })),
+      certifications: (user.certifications || []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        issuer: c.issuer,
+        issueDate: c.issueDate,
+        expiryDate: c.expiryDate,
+        credentialId: c.credentialId,
+        credentialUrl: c.credentialUrl,
+      })),
       createdAt: user.createdAt.toISOString(),
       _count: user._count,
     };

@@ -287,6 +287,46 @@ export interface ConversationItem {
   };
 }
 
+export interface PortfolioProjectItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  projectUrl?: string | null;
+  imageUrl?: string | null;
+  skills: string[];
+}
+
+export interface EmploymentHistoryItem {
+  id: string;
+  company: string;
+  position: string;
+  location?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  current: boolean;
+  description?: string | null;
+}
+
+export interface EducationHistoryItem {
+  id: string;
+  institution: string;
+  degree?: string | null;
+  fieldOfStudy?: string | null;
+  startYear?: string | null;
+  endYear?: string | null;
+  description?: string | null;
+}
+
+export interface CertificationItem {
+  id: string;
+  name: string;
+  issuer: string;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  credentialId?: string | null;
+  credentialUrl?: string | null;
+}
+
 export interface PublicFreelancerProfileData {
   id: string;
   name: string;
@@ -300,6 +340,12 @@ export interface PublicFreelancerProfileData {
   location?: string | null;
   languages: string[];
   portfolioUrls: string[];
+  isAvailable?: boolean;
+  visibility?: "PUBLIC" | "PRIVATE" | string;
+  portfolioProjects?: PortfolioProjectItem[];
+  employmentHistory?: EmploymentHistoryItem[];
+  educationHistory?: EducationHistoryItem[];
+  certifications?: CertificationItem[];
   createdAt: string;
   _count?: {
     freelancerContracts: number;

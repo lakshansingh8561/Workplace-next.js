@@ -34,6 +34,12 @@ async function FreelancerProfileContent() {
       location: true,
       languages: true,
       portfolioUrls: true,
+      isAvailable: true,
+      visibility: true,
+      portfolioProjects: true,
+      employmentHistory: true,
+      educationHistory: true,
+      certifications: true,
     },
   });
 
@@ -53,6 +59,44 @@ async function FreelancerProfileContent() {
     location: dbUser.location,
     languages: dbUser.languages || [],
     portfolioUrls: dbUser.portfolioUrls || [],
+    isAvailable: dbUser.isAvailable ?? true,
+    visibility: (dbUser.visibility as "PUBLIC" | "PRIVATE") || "PUBLIC",
+    portfolioProjects: (dbUser.portfolioProjects || []).map((p) => ({
+      id: p.id,
+      title: p.title,
+      description: p.description,
+      projectUrl: p.projectUrl,
+      imageUrl: p.imageUrl,
+      skills: p.skills || [],
+    })),
+    employmentHistory: (dbUser.employmentHistory || []).map((e) => ({
+      id: e.id,
+      company: e.company,
+      position: e.position,
+      location: e.location,
+      startDate: e.startDate,
+      endDate: e.endDate,
+      current: Boolean(e.current),
+      description: e.description,
+    })),
+    educationHistory: (dbUser.educationHistory || []).map((ed) => ({
+      id: ed.id,
+      institution: ed.institution,
+      degree: ed.degree,
+      fieldOfStudy: ed.fieldOfStudy,
+      startYear: ed.startYear,
+      endYear: ed.endYear,
+      description: ed.description,
+    })),
+    certifications: (dbUser.certifications || []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      issuer: c.issuer,
+      issueDate: c.issueDate,
+      expiryDate: c.expiryDate,
+      credentialId: c.credentialId,
+      credentialUrl: c.credentialUrl,
+    })),
   };
 
   return (
