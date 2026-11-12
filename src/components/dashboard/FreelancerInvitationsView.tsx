@@ -7,18 +7,31 @@ import {
   InvitationDto,
   respondToInvitationAction,
 } from "@/lib/actions/invitation";
+import {
+  respondToHiringOfferAction,
+} from "@/lib/actions/hiring-offer";
+import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
 import { DeclineReasonModal } from "@/components/dashboard/DeclineReasonModal";
+import { CounterOfferModal } from "@/components/dashboard/CounterOfferModal";
 import { Avatar } from "@/components/ui/Avatar";
+import type { HiringOfferItem } from "@/types";
 
 interface FreelancerInvitationsViewProps {
   initialInvitations: InvitationDto[];
+  initialOffers?: HiringOfferItem[];
 }
 
 export function FreelancerInvitationsView({
   initialInvitations,
+  initialOffers = [],
 }: FreelancerInvitationsViewProps) {
   const router = useRouter();
+  const [currentSection, setCurrentSection] = useState<"OFFERS" | "INVITATIONS">(
+    initialOffers.length > 0 ? "OFFERS" : "INVITATIONS"
+  );
   const [invitations, setInvitations] = useState<InvitationDto[]>(initialInvitations);
+  const [offers, setOffers] = useState<HiringOfferItem[]>(initialOffers);
+  const [counterModalOffer, setCounterModalOffer] = useState<HiringOfferItem | null>(null);
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED"
   >("ALL");
@@ -31,6 +44,79 @@ export function FreelancerInvitationsView({
   } | null>(null);
   const [declineModalInvitation, setDeclineModalInvitation] = useState<InvitationDto | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const handleAcceptOffer = (offer: HiringOfferItem) => {
+    setActionError(null);
+    setActiveActionId(offer.id);
+
+    startTransition(async () => {
+      const res = await respondToHiringOfferAction({
+        offerId: offer.id,
+        action: "ACCEPT",
+      });
+
+      if (!res.success) {
+        setActionError(res.error || "Failed to accept hiring offer.");
+        setActiveActionId(null);
+        return;
+      }
+
+      setOffers((prev) =>
+        prev.map((o) => (o.id === offer.id ? { ...o, status: "ACCEPTED" } : o))
+      );
+
+      setActionSuccess({
+        message: "Hiring offer accepted! Your contract is now active.",
+      });
+
+      setActiveActionId(null);
+      if (res.contractId) {
+        router.push(`/contracts/${res.contractId}`);
+      } else {
+        router.refresh();
+      }
+    });
+  };
+
+  const handleDeclineOffer = (offer: HiringOfferItem) => {
+    setActionError(null);
+    setActiveActionId(offer.id);
+
+    startTransition(async () => {
+      const res = await respondToHiringOfferAction({
+        offerId: offer.id,
+        action: "DECLINE",
+      });
+
+      if (!res.success) {
+        setActionError(res.error || "Failed to decline offer.");
+        setActiveActionId(null);
+        return;
+      }
+
+      setOffers((prev) =>
+        prev.map((o) => (o.id === offer.id ? { ...o, status: "DECLINED" } : o))
+      );
+
+      setActionSuccess({
+        message: "Offer declined.",
+      });
+
+      setActiveActionId(null);
+      router.refresh();
+    });
+  };
+
+  const handleStartChatWithClient = async (clientId: string, jobId?: string | null) => {
+    try {
+      const res = await getOrCreateDirectConversationAction(clientId, jobId || undefined);
+      if (res.success && res.conversationId) {
+        router.push(`/messages?conversationId=${res.conversationId}`);
+      }
+    } catch {
+      setActionError("Failed to open chat with client.");
+    }
+  };
 
   // Tab counts
   const pendingCount = invitations.filter((i) => i.status === "PENDING").length;
@@ -232,6 +318,188 @@ export function FreelancerInvitationsView({
         </div>
       )}
 
+      {/* Section Switcher: Direct Offers vs Interview Invitations */}
+      <div className="mt-6 flex border-b border-zinc-200 dark:border-zinc-800">
+        <button
+          type="button"
+          onClick={() => setCurrentSection("OFFERS")}
+          className={`pb-3 px-1 text-sm font-bold border-b-2 transition mr-6 ${
+            currentSection === "OFFERS"
+              ? "border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400"
+              : "border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400"
+          }`}
+        >
+          Direct Hiring Offers ({offers.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setCurrentSection("INVITATIONS")}
+          className={`pb-3 px-1 text-sm font-bold border-b-2 transition ${
+            currentSection === "INVITATIONS"
+              ? "border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400"
+              : "border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400"
+          }`}
+        >
+          Interview Invitations ({invitations.length})
+        </button>
+      </div>
+
+      {currentSection === "OFFERS" && (
+        <div className="mt-6 space-y-4">
+          {offers.length === 0 ? (
+            <div className="rounded-3xl border border-zinc-200 bg-white p-12 text-center shadow-xs dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 text-2xl dark:bg-zinc-800 mb-3">
+                🚀
+              </div>
+              <h3 className="text-base font-bold text-zinc-950 dark:text-white">
+                No direct hiring offers yet
+              </h3>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto">
+                When clients discover your profile and send a direct project offer, it will appear here for you to accept, counter, or decline.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {offers.map((offer) => {
+                const isHourly = offer.type === "HOURLY";
+                const isPendingOffer = offer.status === "PENDING" || offer.status === "COUNTERED";
+
+                return (
+                  <div
+                    key={offer.id}
+                    className="rounded-3xl border border-zinc-200/90 bg-white p-6 shadow-xs hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/90 transition"
+                  >
+                    <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                      <div className="flex items-start gap-4 flex-1">
+                        <Avatar
+                          src={offer.client?.image}
+                          name={offer.client?.name || offer.client?.companyName}
+                          role="CLIENT"
+                          userId={offer.clientId}
+                          size="lg"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-semibold text-zinc-500">From:</span>
+                            <Link
+                              href={`/clients/${offer.clientId}`}
+                              className="text-sm font-extrabold text-zinc-950 hover:text-emerald-600 dark:text-white dark:hover:text-emerald-400 underline"
+                            >
+                              {offer.client?.companyName || offer.client?.name || "Client"}
+                            </Link>
+                          </div>
+
+                          <h3 className="text-lg font-extrabold text-zinc-950 dark:text-white mt-1">
+                            {offer.title}
+                          </h3>
+
+                          {offer.description && (
+                            <p className="text-xs text-zinc-600 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                              {offer.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col md:items-end gap-1.5 shrink-0 text-left md:text-right">
+                        <span className="text-base font-extrabold text-zinc-950 dark:text-white">
+                          ${offer.amount.toLocaleString()} {isHourly ? "/ hr" : "Fixed Budget"}
+                        </span>
+                        {offer.duration && (
+                          <span className="text-xs text-zinc-500">⏱️ {offer.duration}</span>
+                        )}
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                            offer.status === "ACCEPTED"
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400"
+                              : offer.status === "COUNTERED"
+                              ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300"
+                              : offer.status === "DECLINED"
+                              ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-400"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400"
+                          }`}
+                        >
+                          {offer.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Milestones if present */}
+                    {offer.milestones && offer.milestones.length > 0 && (
+                      <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                          Project Milestones ({offer.milestones.length})
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {offer.milestones.map((m, idx) => (
+                            <div
+                              key={idx}
+                              className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-100 dark:border-zinc-800 text-xs flex justify-between items-center"
+                            >
+                              <span className="font-semibold text-zinc-800 dark:text-zinc-200">{m.title}</span>
+                              <span className="font-extrabold text-zinc-900 dark:text-white">${m.amount}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Actions Bar */}
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => handleStartChatWithClient(offer.clientId, offer.jobId)}
+                        className="rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 transition"
+                      >
+                        💬 Chat with Client
+                      </button>
+
+                      {isPendingOffer ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={isPending && activeActionId === offer.id}
+                            onClick={() => handleDeclineOffer(offer)}
+                            className="rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-rose-400 transition"
+                          >
+                            Decline
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isPending && activeActionId === offer.id}
+                            onClick={() => setCounterModalOffer(offer)}
+                            className="rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 transition"
+                          >
+                            Counter-Offer
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isPending && activeActionId === offer.id}
+                            onClick={() => handleAcceptOffer(offer)}
+                            className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition"
+                          >
+                            {isPending && activeActionId === offer.id ? "Accepting..." : "Accept & Start Contract 🚀"}
+                          </button>
+                        </div>
+                      ) : offer.status === "ACCEPTED" && offer.contractId ? (
+                        <Link
+                          href={`/contracts/${offer.contractId}`}
+                          className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition"
+                        >
+                          View Active Contract →
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {currentSection === "INVITATIONS" && (
+        <div className="mt-6">
       {/* Tabs & Search Controls */}
       <div className="mt-6 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
         {/* Status Tab Filters */}
@@ -527,6 +795,8 @@ export function FreelancerInvitationsView({
           })}
         </div>
       )}
+        </div>
+      )}
 
       {/* Decline Invitation Modal */}
       {declineModalInvitation && (
@@ -539,6 +809,24 @@ export function FreelancerInvitationsView({
           description={`Are you sure you want to decline the interview invitation for "${declineModalInvitation.job.title}"?`}
           confirmButtonLabel="Decline Invitation"
           showReasonInput={true}
+        />
+      )}
+
+      {/* Counter Offer Modal */}
+      {counterModalOffer && (
+        <CounterOfferModal
+          isOpen={Boolean(counterModalOffer)}
+          onClose={() => setCounterModalOffer(null)}
+          offerId={counterModalOffer.id}
+          projectTitle={counterModalOffer.title}
+          currentAmount={counterModalOffer.amount}
+          offerType={counterModalOffer.type}
+          onSuccess={() => {
+            setActionSuccess({
+              message: "Counter-offer sent to client successfully!",
+            });
+            router.refresh();
+          }}
         />
       )}
     </div>

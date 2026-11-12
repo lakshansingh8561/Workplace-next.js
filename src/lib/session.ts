@@ -90,7 +90,11 @@ export async function requireRole(
   const allowedList = Array.isArray(allowed) ? allowed : [allowed];
 
   if (!allowedList.includes(user.role)) {
-    redirect("/jobs?error=unauthorized_role");
+    if (user.role === Role.CLIENT) {
+      redirect("/dashboard/client?error=unauthorized_role");
+    } else {
+      redirect("/dashboard/freelancer?error=unauthorized_role");
+    }
   }
 
   return user;

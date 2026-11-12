@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Avatar } from "@/components/ui/Avatar";
 import { StaticStarRating } from "@/components/reviews/StarRating";
 import { PublicReviewsList } from "@/components/reviews/PublicReviewsList";
-import { getOrCreatePreHireConversationAction } from "@/lib/actions/message";
+import { getOrCreatePreHireConversationAction, getOrCreateDirectConversationAction } from "@/lib/actions/message";
 import type { UserReviewsSummary } from "@/lib/actions/review";
 
 export interface PublicClientJobItem {
@@ -70,20 +70,16 @@ export function PublicClientProfileView({
   const [chatError, setChatError] = useState<string | null>(null);
 
   const handleStartChat = async (targetJobId?: string) => {
-    const jobIdToUse = targetJobId || selectedJobId;
-    if (!jobIdToUse) {
-      setChatError("This client currently has no open job postings to discuss.");
-      return;
-    }
+    const jobIdToUse = targetJobId || selectedJobId || undefined;
 
     setIsStartingChat(true);
-    setChatJobId(jobIdToUse);
+    if (jobIdToUse) setChatJobId(jobIdToUse);
     setChatError(null);
 
     try {
-      const res = await getOrCreatePreHireConversationAction(
-        jobIdToUse,
-        client.id
+      const res = await getOrCreateDirectConversationAction(
+        client.id,
+        jobIdToUse
       );
       if (res.success && res.conversationId) {
         router.push(`/messages?conversationId=${res.conversationId}`);

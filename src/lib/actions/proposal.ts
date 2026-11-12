@@ -8,7 +8,7 @@ import {
   OBJECT_ID_REGEX,
 } from "@/lib/validations/proposal";
 import { revalidatePath } from "next/cache";
-import { Prisma } from "@prisma/client";
+import { Prisma, Role, NotificationType } from "@prisma/client";
 import { createNotificationSafe } from "@/lib/actions/notification";
 import type { ReviewProposalItem } from "@/components/dashboard/ClientProposalReview";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -381,11 +381,30 @@ export async function updateProposalStatusAction(
       };
     }
 
-    if (proposal.status !== "PENDING") {
+    if (!["PENDING", "UNDER_REVIEW", "SHORTLISTED"].includes(proposal.status)) {
       return {
         success: false,
         error: `Cannot update proposal. It is already marked as ${proposal.status.toLowerCase()}.`,
       };
+    }
+
+    if (status === "UNDER_REVIEW" || status === "SHORTLISTED") {
+      await prisma.proposal.update({
+        where: { id: proposalId },
+        data: { status },
+      });
+
+      await createNotificationSafe({
+        userId: proposal.freelancerId,
+        type: NotificationType.JOB_ALERT,
+        title: status === "SHORTLISTED" ? "Proposal Shortlisted! ⭐" : "Proposal Under Review 📋",
+        message: `Your proposal for "${proposal.job.title}" has been marked as ${status.toLowerCase().replace("_", " ")}.`,
+        link: `/dashboard/freelancer/proposals`,
+      });
+
+      revalidatePath(`/dashboard/client/jobs/${proposal.job.id}/proposals`);
+      revalidatePath(`/dashboard/freelancer/proposals`);
+      return { success: true, proposalId, status };
     }
 
     if (status === "ACCEPTED") {
@@ -1126,6 +1145,217 @@ export async function getFreelancerProposals(params: {
       totalProposals: 0,
       currentPage: 1,
       totalPages: 1,
+    };
+  }
+}
+
+/**
+ * Server Action: Client initiates rate negotiation on a received proposal.
+ * Creates/updates a linked HiringOffer of type PROPOSAL_NEGOTIATION and posts a notification.
+ */
+export async function negotiateProposalRateAction(
+  proposalId: string,
+  proposedRate: number,
+  message?: string
+): Promise<{ success: boolean; offerId?: string; error?: string }> {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only clients can negotiate proposal rates."
+  );
+  if (!authRes.success) {
+    return { success: false, error: authRes.error };
+  }
+  const clientUser = authRes.user;
+
+  if (!proposalId || !OBJECT_ID_REGEX.test(proposalId)) {
+    return { success: false, error: "Invalid proposal ID." };
+  }
+
+  if (!proposedRate || proposedRate <= 0) {
+    return { success: false, error: "Proposed rate must be greater than zero." };
+  }
+
+  try {
+    const proposal = await prisma.proposal.findUnique({
+      where: { id: proposalId },
+      include: {
+        job: true,
+        freelancer: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!proposal) {
+      return { success: false, error: "Proposal not found." };
+    }
+
+    if (!proposal.job || proposal.job.clientId !== clientUser.id) {
+      return { success: false, error: "Forbidden: You do not own the job for this proposal." };
+    }
+
+    if (!["PENDING", "UNDER_REVIEW", "SHORTLISTED"].includes(proposal.status)) {
+      return { success: false, error: "Cannot negotiate a proposal that has already concluded." };
+    }
+
+    // Upsert or create HiringOffer linked to this proposal
+    let offer = await prisma.hiringOffer.findFirst({
+      where: { proposalId: proposal.id, status: { in: ["PENDING", "COUNTERED"] } },
+    });
+
+    const isHourly = proposal.job.type === "HOURLY";
+    const roundItem = {
+      id: `round_${Date.now()}`,
+      senderId: clientUser.id,
+      senderRole: Role.CLIENT,
+      amount: proposedRate,
+      type: proposal.job.type,
+      message: message || "Rate negotiation initiated by client.",
+      createdAt: new Date(),
+    };
+
+    if (offer) {
+      offer = await prisma.hiringOffer.update({
+        where: { id: offer.id },
+        data: {
+          amount: proposedRate,
+          status: "PENDING",
+          lastActionBy: clientUser.id,
+          message: message || offer.message,
+          negotiationHistory: {
+            push: roundItem,
+          },
+        },
+      });
+    } else {
+      offer = await prisma.hiringOffer.create({
+        data: {
+          clientId: clientUser.id,
+          freelancerId: proposal.freelancerId,
+          jobId: proposal.jobId,
+          proposalId: proposal.id,
+          title: `Proposal Offer: ${proposal.job.title}`,
+          description: `Negotiated offer on applicant proposal. Original bid: $${proposal.bidAmount}. Proposed: $${proposedRate}.`,
+          type: proposal.job.type,
+          amount: proposedRate,
+          duration: proposal.estimatedDuration || "Standard milestone timeline",
+          status: "PENDING",
+          offerType: "PROPOSAL_NEGOTIATION",
+          lastActionBy: clientUser.id,
+          message: message || null,
+          negotiationHistory: [roundItem],
+        },
+      });
+    }
+
+    // Send context message in chat
+    const { getOrCreateDirectConversationAction } = await import("@/lib/actions/message");
+    const convRes = await getOrCreateDirectConversationAction(proposal.freelancerId, proposal.jobId);
+    if (convRes.success && convRes.conversationId) {
+      const rateLabel = isHourly ? `$${proposedRate}/hr` : `$${proposedRate.toLocaleString()} Fixed`;
+      await prisma.message.create({
+        data: {
+          conversationId: convRes.conversationId,
+          senderId: clientUser.id,
+          content: `💬 **Rate Negotiation**: Client proposed ${rateLabel} for "${proposal.job.title}".\n${
+            message ? `> ${message}\n` : ""
+          }You can accept this offer, decline, or counter-offer.`,
+          read: false,
+        },
+      });
+      await prisma.conversation.update({
+        where: { id: convRes.conversationId },
+        data: { lastMessageAt: new Date() },
+      });
+    }
+
+    // Notify freelancer
+    await createNotificationSafe({
+      userId: proposal.freelancerId,
+      type: NotificationType.HIRING_OFFER,
+      title: "Rate Negotiation Received 💬",
+      message: `${clientUser.name || "Client"} proposed a revised rate of $${proposedRate} on your proposal for "${proposal.job.title}".`,
+      link: `/dashboard/freelancer/proposals`,
+    });
+
+    revalidatePath(`/dashboard/client/jobs/${proposal.jobId}/proposals`);
+    revalidatePath("/dashboard/freelancer/proposals");
+    revalidatePath("/messages");
+
+    return {
+      success: true,
+      offerId: offer.id,
+    };
+  } catch (error) {
+    console.error("[WorkPulse Negotiate Proposal Error]:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to submit rate negotiation.",
+    };
+  }
+}
+
+/**
+ * Server Action: Freelancer withdraws an active proposal.
+ */
+export async function withdrawProposalAction(
+  proposalId: string
+): Promise<{ success: boolean; error?: string }> {
+  const authRes = await verifyUserForAction(
+    "FREELANCER",
+    "Unauthorized: Only freelancers can withdraw proposals."
+  );
+  if (!authRes.success) {
+    return { success: false, error: authRes.error };
+  }
+  const freelancerUser = authRes.user;
+
+  if (!proposalId || !OBJECT_ID_REGEX.test(proposalId)) {
+    return { success: false, error: "Invalid proposal ID." };
+  }
+
+  try {
+    const proposal = await prisma.proposal.findUnique({
+      where: { id: proposalId },
+      include: { job: true },
+    });
+
+    if (!proposal) {
+      return { success: false, error: "Proposal not found." };
+    }
+
+    if (proposal.freelancerId !== freelancerUser.id) {
+      return { success: false, error: "Forbidden: You do not own this proposal." };
+    }
+
+    if (proposal.status === "ACCEPTED" || proposal.status === "WITHDRAWN") {
+      return { success: false, error: `Cannot withdraw proposal in ${proposal.status.toLowerCase()} status.` };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.proposal.update({
+        where: { id: proposalId },
+        data: { status: "WITHDRAWN" },
+      });
+
+      // Decrement job proposalsCount
+      if (proposal.jobId) {
+        await tx.job.update({
+          where: { id: proposal.jobId },
+          data: { proposalsCount: { decrement: 1 } },
+        });
+      }
+    });
+
+    revalidatePath("/dashboard/freelancer/proposals");
+    if (proposal.jobId) {
+      revalidatePath(`/dashboard/client/jobs/${proposal.jobId}/proposals`);
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("[WorkPulse Withdraw Proposal Error]:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to withdraw proposal.",
     };
   }
 }

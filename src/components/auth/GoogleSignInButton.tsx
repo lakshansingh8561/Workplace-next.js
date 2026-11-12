@@ -10,7 +10,7 @@ interface GoogleSignInButtonProps {
 
 export function GoogleSignInButton({
   label = "Continue with Google",
-  redirectTo = "/jobs",
+  redirectTo = "/dashboard",
 }: GoogleSignInButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
 

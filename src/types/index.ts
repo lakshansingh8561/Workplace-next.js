@@ -138,7 +138,81 @@ export interface HowItWorksStep {
   forRole: "client" | "freelancer";
 }
 
-export type ProposalStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+export type ProposalStatus =
+  | "PENDING"
+  | "UNDER_REVIEW"
+  | "SHORTLISTED"
+  | "ACCEPTED"
+  | "REJECTED"
+  | "WITHDRAWN";
+
+export type OfferStatus =
+  | "PENDING"
+  | "ACCEPTED"
+  | "DECLINED"
+  | "COUNTERED"
+  | "WITHDRAWN"
+  | "EXPIRED";
+
+export type OfferType = "DIRECT_HIRE" | "PROPOSAL_NEGOTIATION";
+
+export interface OfferMilestoneItem {
+  title: string;
+  description?: string | null;
+  amount: number;
+  dueDate?: string | null;
+}
+
+export interface NegotiationRoundItem {
+  id: string;
+  senderId: string;
+  senderRole: "CLIENT" | "FREELANCER";
+  amount: number;
+  type: "FIXED" | "HOURLY";
+  message?: string | null;
+  createdAt: string | Date;
+}
+
+export interface HiringOfferItem {
+  id: string;
+  clientId: string;
+  freelancerId: string;
+  jobId?: string | null;
+  proposalId?: string | null;
+  contractId?: string | null;
+  title: string;
+  description: string;
+  type: "FIXED" | "HOURLY";
+  amount: number;
+  duration?: string | null;
+  startDate?: string | Date | null;
+  milestones?: OfferMilestoneItem[];
+  negotiationHistory?: NegotiationRoundItem[];
+  status: OfferStatus;
+  offerType: OfferType;
+  lastActionBy?: string | null;
+  message?: string | null;
+  declineReason?: string | null;
+  createdAt: string | Date;
+  updatedAt?: string | Date;
+  client?: {
+    id: string;
+    name?: string | null;
+    image?: string | null;
+    companyName?: string | null;
+  };
+  freelancer?: {
+    id: string;
+    name?: string | null;
+    image?: string | null;
+    title?: string | null;
+  };
+  job?: {
+    id: string;
+    title: string;
+    status: string;
+  } | null;
+}
 
 export interface Proposal {
   id: string;

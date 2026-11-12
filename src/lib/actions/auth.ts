@@ -245,7 +245,31 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
   }
 
   const { email, password, redirectTo } = result.data;
-  const destination = sanitizeRedirectPath(redirectTo);
+  
+  // Resolve role-based default destination
+  let destination = sanitizeRedirectPath(redirectTo);
+  let userRole: Role | undefined;
+
+  try {
+    const dbUser = await prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+      select: { role: true, roleSelected: true },
+    });
+    if (dbUser) {
+      userRole = dbUser.role as Role;
+      if (!redirectTo || redirectTo === "/jobs" || redirectTo === "/dashboard") {
+        if (!dbUser.roleSelected) {
+          destination = "/onboarding/role";
+        } else if (dbUser.role === "CLIENT") {
+          destination = "/dashboard/client";
+        } else {
+          destination = "/dashboard/freelancer";
+        }
+      }
+    }
+  } catch {
+    // Non-blocking fallback
+  }
 
   // Rate limit login attempts by IP and email (5 attempts per minute)
   const clientIp = await getClientIp();
@@ -269,6 +293,7 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
 
     return {
       success: true,
+      role: userRole,
     };
   } catch (error) {
     if (error instanceof AuthError) {

@@ -32,11 +32,11 @@ export type SignupInput = z.infer<typeof SignupSchema>;
  * - Protocol-relative paths (//evil.com)
  * - Backslash bypasses (/\evil.com, \evil.com, /evil.com\test)
  * - Unsafe URI schemes (javascript:, data:)
- * Falls back to safe internal destination '/jobs'.
+ * Falls back to safe internal destination '/dashboard'.
  */
 export function sanitizeRedirectPath(
   target: string | null | undefined,
-  fallback = "/jobs"
+  fallback = "/dashboard"
 ): string {
   if (!target || typeof target !== "string") return fallback;
   const trimmed = target.trim();

@@ -7,6 +7,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import {
   SearchClientsResult,
 } from "@/lib/actions/client-discovery";
+import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
 
 interface ClientDiscoveryViewProps {
   initialData: SearchClientsResult;
@@ -24,6 +25,25 @@ export function ClientDiscoveryView({ initialData }: ClientDiscoveryViewProps) {
   const [sortBy, setSortBy] = useState(
     searchParams.get("sort") || "jobs_desc"
   );
+  const [activeChatClientId, setActiveChatClientId] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  const handleMessageClient = async (clientId: string) => {
+    setActiveChatClientId(clientId);
+    setChatError(null);
+    try {
+      const res = await getOrCreateDirectConversationAction(clientId);
+      if (res.success && res.conversationId) {
+        router.push(`/messages?conversationId=${res.conversationId}`);
+      } else {
+        setChatError(res.error || "Unable to open conversation with this client.");
+      }
+    } catch {
+      setChatError("Failed to initiate chat. Please try again.");
+    } finally {
+      setActiveChatClientId(null);
+    }
+  };
 
   const applyFilters = (newParams: Record<string, string>) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -270,19 +290,27 @@ export function ClientDiscoveryView({ initialData }: ClientDiscoveryViewProps) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <Link
                       href={`/clients/${client.id}`}
-                      className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition"
+                      className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-2 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition text-center"
                     >
-                      View Profile
+                      Profile
                     </Link>
                     <Link
                       href={`/clients/${client.id}#jobs`}
-                      className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition"
+                      className="inline-flex items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 transition text-center"
                     >
-                      View Jobs ({client.openJobsCount})
+                      Jobs ({client.openJobsCount})
                     </Link>
+                    <button
+                      type="button"
+                      disabled={activeChatClientId === client.id}
+                      onClick={() => handleMessageClient(client.id)}
+                      className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-2 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition text-center disabled:opacity-50"
+                    >
+                      {activeChatClientId === client.id ? "Connecting..." : "💬 Message"}
+                    </button>
                   </div>
                 </div>
               </div>

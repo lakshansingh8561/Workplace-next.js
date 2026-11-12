@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Avatar } from "@/components/ui/Avatar";
 import { SearchFreelancersResult } from "@/lib/actions/freelancer-discovery";
+import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
+import { DirectHireModal } from "@/components/dashboard/DirectHireModal";
 
 interface FreelancerDiscoveryViewProps {
   initialData: SearchFreelancersResult;
@@ -26,6 +28,30 @@ export function FreelancerDiscoveryView({
   const [availability, setAvailability] = useState(searchParams.get("isAvailable") || "ALL");
   const [minRating, setMinRating] = useState(searchParams.get("minRating") || "ALL");
   const [sortBy, setSortBy] = useState(searchParams.get("sort") || "rating");
+  const [activeChatFreelancerId, setActiveChatFreelancerId] = useState<string | null>(null);
+  const [hireFreelancer, setHireFreelancer] = useState<{
+    id: string;
+    name: string;
+    rate?: number | null;
+  } | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  const handleMessageFreelancer = async (freelancerId: string) => {
+    setActiveChatFreelancerId(freelancerId);
+    setChatError(null);
+    try {
+      const res = await getOrCreateDirectConversationAction(freelancerId);
+      if (res.success && res.conversationId) {
+        router.push(`/messages?conversationId=${res.conversationId}`);
+      } else {
+        setChatError(res.error || "Unable to start conversation with freelancer.");
+      }
+    } catch {
+      setChatError("Failed to initiate chat. Please try again.");
+    } finally {
+      setActiveChatFreelancerId(null);
+    }
+  };
 
   const applyFilters = (newParams: Record<string, string>) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -446,20 +472,35 @@ export function FreelancerDiscoveryView({
                 )}
               </div>
 
-              {/* Card Footer Actions */}
-              <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/80 grid grid-cols-2 gap-2">
+              {/* Card Footer Actions: View Profile, Message Freelancer, Hire Freelancer */}
+              <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/80 grid grid-cols-3 gap-2">
                 <Link
                   href={`/freelancers/${f.id}`}
-                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition"
+                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-2 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition text-center"
                 >
-                  View Profile
+                  Profile
                 </Link>
-                <Link
-                  href={`/freelancers/${f.id}#contact`}
-                  className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition"
+                <button
+                  type="button"
+                  disabled={activeChatFreelancerId === f.id}
+                  onClick={() => handleMessageFreelancer(f.id)}
+                  className="inline-flex items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 px-2 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 transition text-center disabled:opacity-50"
                 >
-                  Contact Candidate
-                </Link>
+                  {activeChatFreelancerId === f.id ? "..." : "💬 Chat"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setHireFreelancer({
+                      id: f.id,
+                      name: f.name || "Freelancer",
+                      rate: f.hourlyRate,
+                    })
+                  }
+                  className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-2 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition text-center"
+                >
+                  Hire
+                </button>
               </div>
             </div>
           ))}
@@ -489,6 +530,24 @@ export function FreelancerDiscoveryView({
             Next →
           </button>
         </div>
+      )}
+
+      {/* Direct Hire Modal */}
+      {hireFreelancer && (
+        <DirectHireModal
+          isOpen={Boolean(hireFreelancer)}
+          onClose={() => setHireFreelancer(null)}
+          freelancerId={hireFreelancer.id}
+          freelancerName={hireFreelancer.name}
+          freelancerHourlyRate={hireFreelancer.rate}
+          onSuccess={(_, conversationId) => {
+            if (conversationId) {
+              router.push(`/messages?conversationId=${conversationId}`);
+            } else {
+              router.push("/dashboard/client");
+            }
+          }}
+        />
       )}
     </div>
   );

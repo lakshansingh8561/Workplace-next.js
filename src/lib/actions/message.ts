@@ -430,6 +430,204 @@ export async function getOrCreatePreHireConversationAction(
   }
 }
 
+/**
+ * Universal Action to initiate or retrieve a direct conversation between Client and Freelancer.
+ * Reuses existing conversation thread if one already exists between these two users.
+ * If no thread exists, associates with a relevant client job or creates a clean consultation job container.
+ */
+export async function getOrCreateDirectConversationAction(
+  counterpartyId: string,
+  preferredJobId?: string
+): Promise<{ success: boolean; conversationId?: string; error?: string; isExisting?: boolean }> {
+  const authRes = await verifyUserForAction(
+    ["CLIENT", "FREELANCER"],
+    "Unauthorized: You must be signed in to message another user.",
+    { requireEmailVerified: false }
+  );
+  if (!authRes.success) {
+    return {
+      success: false,
+      error: authRes.error,
+    };
+  }
+  const user = authRes.user;
+
+  if (!counterpartyId || !OBJECT_ID_REGEX.test(counterpartyId)) {
+    return {
+      success: false,
+      error: "Invalid user ID.",
+    };
+  }
+
+  if (counterpartyId === user.id) {
+    return {
+      success: false,
+      error: "You cannot initiate a conversation with yourself.",
+    };
+  }
+
+  try {
+    let actualClientId: string;
+    let actualFreelancerId: string;
+
+    if (user.role === "CLIENT") {
+      actualClientId = user.id;
+      actualFreelancerId = counterpartyId;
+
+      const freelancer = await prisma.user.findUnique({
+        where: { id: actualFreelancerId },
+        select: { id: true, role: true, roleSelected: true },
+      });
+      if (!freelancer || freelancer.role !== "FREELANCER") {
+        return {
+          success: false,
+          error: "Selected recipient is not an active freelancer.",
+        };
+      }
+    } else {
+      actualClientId = counterpartyId;
+      actualFreelancerId = user.id;
+
+      const client = await prisma.user.findUnique({
+        where: { id: actualClientId },
+        select: { id: true, role: true, roleSelected: true },
+      });
+      if (!client || client.role !== "CLIENT") {
+        return {
+          success: false,
+          error: "Selected recipient is not an active client.",
+        };
+      }
+    }
+
+    // 1. Check for ANY existing conversation between this client and freelancer
+    const existingConversation = await prisma.conversation.findFirst({
+      where: {
+        clientId: actualClientId,
+        freelancerId: actualFreelancerId,
+      },
+      orderBy: { lastMessageAt: "desc" },
+      select: { id: true },
+    });
+
+    if (existingConversation) {
+      return {
+        success: true,
+        conversationId: existingConversation.id,
+        isExisting: true,
+      };
+    }
+
+    // 2. Resolve job ID to link the conversation
+    let targetJobId: string | undefined = undefined;
+
+    if (preferredJobId && OBJECT_ID_REGEX.test(preferredJobId)) {
+      const candidate = await prisma.job.findFirst({
+        where: { id: preferredJobId, clientId: actualClientId },
+        select: { id: true },
+      });
+      if (candidate) {
+        targetJobId = candidate.id;
+      }
+    }
+
+    if (!targetJobId) {
+      const openJob = await prisma.job.findFirst({
+        where: { clientId: actualClientId, status: "OPEN" },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (openJob) {
+        targetJobId = openJob.id;
+      }
+    }
+
+    if (!targetJobId) {
+      const anyJob = await prisma.job.findFirst({
+        where: { clientId: actualClientId },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (anyJob) {
+        targetJobId = anyJob.id;
+      }
+    }
+
+    if (!targetJobId) {
+      // Create a lightweight consultation container job so the unique index [jobId, freelancerId] is satisfied
+      const consultJob = await prisma.job.create({
+        data: {
+          title: "Project Consultation",
+          description: "Direct client-freelancer consultation and project requirements discussion.",
+          category: "General",
+          type: "FIXED",
+          status: "OPEN",
+          clientId: actualClientId,
+        },
+        select: { id: true },
+      });
+      targetJobId = consultJob.id;
+    }
+
+    // 3. Create pre-hire conversation
+    let createdConv;
+    try {
+      createdConv = await prisma.conversation.create({
+        data: {
+          type: "PRE_HIRE",
+          jobId: targetJobId,
+          clientId: actualClientId,
+          freelancerId: actualFreelancerId,
+          lastMessageAt: new Date(),
+        },
+        select: { id: true },
+      });
+    } catch (createErr) {
+      if (
+        (createErr instanceof Prisma.PrismaClientKnownRequestError &&
+          createErr.code === "P2002") ||
+        (createErr as { code?: string })?.code === "P2002"
+      ) {
+        createdConv = await prisma.conversation.findUnique({
+          where: {
+            jobId_freelancerId: {
+              jobId: targetJobId,
+              freelancerId: actualFreelancerId,
+            },
+          },
+          select: { id: true },
+        });
+      } else {
+        throw createErr;
+      }
+    }
+
+    if (!createdConv) {
+      return {
+        success: false,
+        error: "Failed to initialize direct conversation.",
+      };
+    }
+
+    revalidatePath("/messages");
+
+    return {
+      success: true,
+      conversationId: createdConv.id,
+      isExisting: false,
+    };
+  } catch (error) {
+    console.error(
+      "[WorkPulse Direct Messaging Error]:",
+      error instanceof Error ? error.message : "Database error"
+    );
+    return {
+      success: false,
+      error: "Unable to establish direct conversation thread.",
+    };
+  }
+}
+
 export interface GetConversationsOptions {
   limit?: number;
   cursor?: string;

@@ -12,7 +12,7 @@ describe('sanitizeRedirectPath', () => {
   it('rejects external URLs', () => {
     const unsafe = ['https://evil.com', '//evil.com', '/\\evil.com', 'javascript:alert(1)'];
     for (const u of unsafe) {
-      expect(sanitizeRedirectPath(u)).toBe('/jobs');
+      expect(sanitizeRedirectPath(u)).toBe('/dashboard');
     }
   });
 });

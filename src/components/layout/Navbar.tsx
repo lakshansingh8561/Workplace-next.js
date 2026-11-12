@@ -50,8 +50,14 @@ function useActiveNav() {
         (pathname.startsWith("/jobs") && !pathname.startsWith("/jobs/new") && pathname !== "/jobs/saved")
       );
     }
+    if (href === "/jobs/new") {
+      return pathname === "/jobs/new";
+    }
+    if (href === "/dashboard/client/proposals") {
+      return pathname.startsWith("/dashboard/client/proposals");
+    }
     if (href === "/dashboard/client") {
-      return pathname.startsWith("/dashboard/client");
+      return pathname === "/dashboard/client";
     }
     if (href === "/dashboard/freelancer/payments") {
       return pathname === "/dashboard/freelancer/payments";
@@ -105,6 +111,12 @@ function DesktopNavList({
           </Link>
           <Link href="/dashboard/client" className={getLinkClass("/dashboard/client")}>
             My Jobs
+          </Link>
+          <Link href="/jobs/new" className={getLinkClass("/jobs/new")}>
+            Post a Job
+          </Link>
+          <Link href="/dashboard/client/proposals" className={getLinkClass("/dashboard/client/proposals")}>
+            Proposals
           </Link>
           <Link href="/contracts" className={getLinkClass("/contracts")}>
             Contracts
@@ -248,6 +260,20 @@ function MobileNavList({
             className={getLinkClass("/dashboard/client")}
           >
             My Jobs & Dashboard
+          </Link>
+          <Link
+            href="/jobs/new"
+            onClick={closeMenu}
+            className={getLinkClass("/jobs/new")}
+          >
+            Post a Job
+          </Link>
+          <Link
+            href="/dashboard/client/proposals"
+            onClick={closeMenu}
+            className={getLinkClass("/dashboard/client/proposals")}
+          >
+            Proposals & Applicants
           </Link>
           <Link
             href="/contracts"

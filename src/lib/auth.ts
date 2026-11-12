@@ -138,9 +138,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return "/login?error=UnverifiedEmail";
         }
 
-        // 2. Prevent account takeover / unsafe linking:
-        // If an account with this email was created via Credentials (password exists),
-        // and has not been linked with Google, reject automatic takeover.
+        // 2. Verified Google Account linking:
+        // If an account with this email already exists, link Google to the user
+        // provided Google has verified the email address.
         if (user.email) {
           try {
             const existingUser = await prisma.user.findUnique({
@@ -148,20 +148,37 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               include: { accounts: true },
             });
 
-            if (existingUser && existingUser.passwordHash) {
+            if (existingUser) {
               const hasGoogleLinked = existingUser.accounts.some(
                 (acc) => acc.provider === "google"
               );
-              if (!hasGoogleLinked) {
-                console.warn(
-                  "[WorkPulse Auth] Google sign-in conflict: account already registered with credentials"
+              if (!hasGoogleLinked && account) {
+                await prisma.account.create({
+                  data: {
+                    userId: existingUser.id,
+                    type: account.type,
+                    provider: account.provider,
+                    providerAccountId: account.providerAccountId,
+                    access_token: account.access_token,
+                    token_type: account.token_type,
+                    id_token: account.id_token,
+                    scope: account.scope,
+                  },
+                });
+                console.log(
+                  `[WorkPulse Auth] Successfully linked Google OAuth account to existing user: ${user.email}`
                 );
-                return "/login?error=OAuthAccountNotLinked";
+              }
+              if (!existingUser.emailVerified) {
+                await prisma.user.update({
+                  where: { id: existingUser.id },
+                  data: { emailVerified: new Date() },
+                });
               }
             }
           } catch (err) {
             console.error(
-              "[WorkPulse Auth Error] Account check error:",
+              "[WorkPulse Auth Error] Account linking error:",
               err instanceof Error ? err.message : "Database error"
             );
           }

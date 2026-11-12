@@ -19,6 +19,7 @@ interface ClientDashboardPageProps {
     status?: string;
     search?: string;
     page?: string;
+    tab?: string;
   }>;
 }
 
@@ -55,8 +56,18 @@ async function ClientDashboardContent({
     ];
   }
 
-  // Single query with live proposal count to eliminate N+1 and count divergence
-  const [totalJobs, rawJobs] = await Promise.all([
+  // Query in parallel
+  const [
+    totalJobs,
+    rawJobs,
+    activeJobsCount,
+    totalProposalsCount,
+    ongoingContracts,
+    recentProposals,
+    availableFreelancers,
+    hiringOffers,
+    recentConversations,
+  ] = await Promise.all([
     prisma.job.count({ where }),
     prisma.job.findMany({
       where,
@@ -76,6 +87,75 @@ async function ClientDashboardContent({
         _count: {
           select: { proposals: true },
         },
+      },
+    }),
+    prisma.job.count({
+      where: { clientId: user.id, status: "OPEN" },
+    }),
+    prisma.proposal.count({
+      where: { job: { clientId: user.id } },
+    }),
+    prisma.contract.findMany({
+      where: { clientId: user.id, status: "ACTIVE" },
+      orderBy: { startDate: "desc" },
+      take: 6,
+      include: {
+        freelancer: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            title: true,
+          },
+        },
+      },
+    }),
+    prisma.proposal.findMany({
+      where: { job: { clientId: user.id } },
+      orderBy: { createdAt: "desc" },
+      take: 6,
+      include: {
+        job: { select: { id: true, title: true, type: true } },
+        freelancer: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            title: true,
+            hourlyRate: true,
+          },
+        },
+      },
+    }),
+    prisma.user.findMany({
+      where: { role: "FREELANCER", isAvailable: true, visibility: "PUBLIC" },
+      orderBy: { updatedAt: "desc" },
+      take: 4,
+      select: {
+        id: true,
+        name: true,
+        image: true,
+        title: true,
+        skills: true,
+        hourlyRate: true,
+        location: true,
+      },
+    }),
+    prisma.hiringOffer.findMany({
+      where: { clientId: user.id },
+      orderBy: { updatedAt: "desc" },
+      take: 6,
+      include: {
+        freelancer: { select: { id: true, name: true, image: true, title: true } },
+      },
+    }),
+    prisma.conversation.findMany({
+      where: { clientId: user.id },
+      orderBy: { lastMessageAt: "desc" },
+      take: 5,
+      include: {
+        freelancer: { select: { id: true, name: true, image: true } },
+        messages: { orderBy: { createdAt: "desc" }, take: 1 },
       },
     }),
   ]);
@@ -104,6 +184,44 @@ async function ClientDashboardContent({
       totalPages={totalPages}
       currentStatus={statusParam || ""}
       searchQuery={searchQuery}
+      activeJobsCount={activeJobsCount}
+      totalProposalsCount={totalProposalsCount}
+      ongoingContractsCount={ongoingContracts.length}
+      ongoingContracts={ongoingContracts.map((c) => ({
+        id: c.id,
+        title: c.title,
+        type: c.type,
+        totalAmount: c.totalAmount,
+        hourlyRate: c.hourlyRate,
+        startDate: c.startDate.toISOString(),
+        freelancer: c.freelancer,
+      }))}
+      recentProposals={recentProposals.map((p) => ({
+        id: p.id,
+        jobId: p.jobId,
+        freelancerId: p.freelancerId,
+        bidAmount: p.bidAmount,
+        status: p.status,
+        createdAt: p.createdAt.toISOString(),
+        job: p.job,
+        freelancer: p.freelancer,
+      }))}
+      availableFreelancers={availableFreelancers}
+      hiringOffers={hiringOffers.map((o) => ({
+        id: o.id,
+        title: o.title,
+        type: o.type,
+        amount: o.amount,
+        status: o.status,
+        updatedAt: o.updatedAt.toISOString(),
+        freelancer: o.freelancer,
+      }))}
+      recentConversations={recentConversations.map((c) => ({
+        id: c.id,
+        lastMessageAt: c.lastMessageAt.toISOString(),
+        freelancer: c.freelancer,
+        lastMessage: c.messages[0]?.content || "Conversation started",
+      }))}
     />
   );
 }

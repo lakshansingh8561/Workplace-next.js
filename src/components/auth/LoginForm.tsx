@@ -47,16 +47,24 @@ export function LoginForm() {
 
     startTransition(async () => {
       try {
+        const rawRedirect = searchParams.get("redirectTo");
         const result = await loginUser({
           email,
           password,
-          redirectTo,
+          redirectTo: rawRedirect || undefined,
         });
 
         if (result && !result.success) {
           setError(result.error || "Invalid credentials.");
         } else {
-          router.push(redirectTo);
+          const target = rawRedirect
+            ? sanitizeRedirectPath(rawRedirect)
+            : result?.role === "CLIENT"
+            ? "/dashboard/client"
+            : result?.role === "FREELANCER"
+            ? "/dashboard/freelancer"
+            : "/dashboard";
+          router.push(target);
           router.refresh();
         }
       } catch (err) {

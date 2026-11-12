@@ -191,19 +191,30 @@ export async function sendEmail({
   if (emailUser && emailPass && smtpHost) {
     try {
       const cleanPass = emailPass.replace(/\s+/g, "");
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        requireTLS: smtpPort === 587,
-        connectionTimeout: 10000, // 10s timeout
-        greetingTimeout: 10000, // 10s timeout
-        socketTimeout: 15000, // 15s timeout
-        auth: {
-          user: emailUser,
-          pass: cleanPass,
-        },
-      });
+      const isGmail = emailUser.includes("@gmail.com") || smtpHost === "smtp.gmail.com";
+      const transporter = nodemailer.createTransport(
+        isGmail
+          ? {
+              service: "gmail",
+              auth: {
+                user: emailUser,
+                pass: cleanPass,
+              },
+            }
+          : {
+              host: smtpHost,
+              port: smtpPort,
+              secure: smtpPort === 465,
+              requireTLS: smtpPort === 587,
+              connectionTimeout: 10000, // 10s timeout
+              greetingTimeout: 10000, // 10s timeout
+              socketTimeout: 15000, // 15s timeout
+              auth: {
+                user: emailUser,
+                pass: cleanPass,
+              },
+            }
+      );
 
       const info = await transporter.sendMail({
         from: fromAddress,
@@ -411,6 +422,10 @@ export async function sendEmailVerificationOtp({
   recipientName?: string | null;
 }): Promise<EmailDeliveryResult> {
   const greeting = recipientName ? `Hello ${recipientName},` : "Hello,";
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[WorkPulse Email OTP (DEV ONLY)] 📩 6-digit verification code for ${to}: ${otp}`);
+  }
 
   const subject = `${otp} is your WorkPulse verification code`;
 

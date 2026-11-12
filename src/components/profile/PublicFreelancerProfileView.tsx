@@ -10,7 +10,8 @@ import { StaticStarRating } from "@/components/reviews/StarRating";
 import { isSafeHttpUrl } from "@/lib/validations/profile";
 import { Avatar } from "@/components/ui/Avatar";
 import { SendInvitationModal } from "@/components/dashboard/SendInvitationModal";
-import { getOrCreatePreHireConversationAction } from "@/lib/actions/message";
+import { DirectHireModal } from "@/components/dashboard/DirectHireModal";
+import { getOrCreatePreHireConversationAction, getOrCreateDirectConversationAction } from "@/lib/actions/message";
 
 export type { PublicFreelancerProfileData };
 
@@ -32,6 +33,7 @@ export function PublicFreelancerProfileView({
   const router = useRouter();
   const displayName = profile.name || "Freelancer";
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [isDirectHireOpen, setIsDirectHireOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string>(clientJobs[0]?.id || "");
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -76,18 +78,17 @@ export function PublicFreelancerProfileView({
   );
 
   const handleStartDirectChat = async () => {
-    if (!selectedJobId) {
-      setChatError("Please select an active job opening to initiate discussion.");
-      return;
-    }
     setIsStartingChat(true);
     setChatError(null);
     try {
-      const res = await getOrCreatePreHireConversationAction(selectedJobId, profile.id);
+      const res = await getOrCreateDirectConversationAction(
+        profile.id,
+        selectedJobId || undefined
+      );
       if (res.success && res.conversationId) {
         router.push(`/messages?conversationId=${res.conversationId}`);
       } else {
-        setChatError(res.error || "Unable to start pre-hire conversation.");
+        setChatError(res.error || "Unable to start conversation with freelancer.");
       }
     } catch (err) {
       console.error("Direct chat error:", err);
@@ -223,60 +224,63 @@ export function PublicFreelancerProfileView({
             {!isOwner && (
               <div id="contact" className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
                 {currentUserRole === "CLIENT" ? (
-                  clientJobs.length > 0 ? (
-                    <div className="space-y-2 text-left">
-                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
-                        Select Job To Discuss
-                      </label>
-                      <select
-                        value={selectedJobId}
-                        onChange={(e) => setSelectedJobId(e.target.value)}
-                        className="w-full rounded-xl border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-800 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
-                      >
-                        {clientJobs.map((j) => (
-                          <option key={j.id} value={j.id}>
-                            {j.title}
-                          </option>
-                        ))}
-                      </select>
+                  <div className="space-y-3 text-left">
+                    {/* Primary Direct Hire CTA */}
+                    <button
+                      type="button"
+                      onClick={() => setIsDirectHireOpen(true)}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-emerald-500 transition active:scale-98"
+                    >
+                      <span>🚀 Hire Freelancer</span>
+                      <span>→</span>
+                    </button>
 
-                      {chatError && (
-                        <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
-                          {chatError}
-                        </p>
-                      )}
+                    {/* Direct Message Button */}
+                    <button
+                      type="button"
+                      disabled={isStartingChat}
+                      onClick={handleStartDirectChat}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-bold text-zinc-800 shadow-xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 transition disabled:opacity-50"
+                    >
+                      <span>💬</span>
+                      <span>{isStartingChat ? "Opening Chat..." : "Message Freelancer"}</span>
+                    </button>
 
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        <button
-                          type="button"
-                          disabled={isStartingChat}
-                          onClick={handleStartDirectChat}
-                          className="w-full rounded-xl border border-zinc-200 bg-white py-2 text-xs font-bold text-zinc-800 shadow-xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 transition"
-                        >
-                          {isStartingChat ? "Connecting..." : "💬 Chat"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsInviteModalOpen(true)}
-                          className="w-full rounded-xl bg-emerald-600 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition"
-                        >
-                          🤝 Invite
-                        </button>
+                    {/* Job Invitation (if client has jobs) */}
+                    {clientJobs.length > 0 && (
+                      <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">
+                          Or Invite to Open Job
+                        </label>
+                        <div className="flex gap-2">
+                          <select
+                            value={selectedJobId}
+                            onChange={(e) => setSelectedJobId(e.target.value)}
+                            className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-800 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                          >
+                            {clientJobs.map((j) => (
+                              <option key={j.id} value={j.id}>
+                                {j.title}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setIsInviteModalOpen(true)}
+                            className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-850 dark:bg-indigo-950/40 dark:text-indigo-300 transition"
+                          >
+                            Invite
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 text-center">
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        Post a job opening to interview this candidate.
+                    )}
+
+                    {chatError && (
+                      <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 text-center">
+                        {chatError}
                       </p>
-                      <Link
-                        href="/jobs/new"
-                        className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition"
-                      >
-                        ➕ Post a Job to Interview
-                      </Link>
-                    </div>
-                  )
+                    )}
+                  </div>
                 ) : (
                   <Link
                     href="/login?callbackUrl=/freelancers"
@@ -663,6 +667,30 @@ export function PublicFreelancerProfileView({
           onSuccess={(conversationId) => {
             setIsInviteModalOpen(false);
             router.push(`/messages?conversationId=${conversationId}`);
+          }}
+        />
+      )}
+
+      {/* Direct Hire Modal */}
+      {isDirectHireOpen && (
+        <DirectHireModal
+          isOpen={isDirectHireOpen}
+          onClose={() => setIsDirectHireOpen(false)}
+          freelancerId={profile.id}
+          freelancerName={displayName}
+          freelancerHourlyRate={profile.hourlyRate}
+          clientJobs={clientJobs.map((j) => ({
+            id: j.id,
+            title: j.title,
+            type: "FIXED",
+          }))}
+          onSuccess={(_, conversationId) => {
+            setIsDirectHireOpen(false);
+            if (conversationId) {
+              router.push(`/messages?conversationId=${conversationId}`);
+            } else {
+              router.push("/dashboard/client");
+            }
           }}
         />
       )}

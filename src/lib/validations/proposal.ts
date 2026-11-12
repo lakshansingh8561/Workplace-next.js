@@ -35,9 +35,23 @@ export const UpdateProposalStatusSchema = z.object({
     .string()
     .trim()
     .regex(OBJECT_ID_REGEX, "Invalid Proposal ID. Expected a 24-character hexadecimal ObjectId"),
-  status: z.enum(["ACCEPTED", "REJECTED"], {
-    error: "Status must be either ACCEPTED or REJECTED",
-  }),
+  status: z.enum(
+    ["ACCEPTED", "REJECTED", "UNDER_REVIEW", "SHORTLISTED", "WITHDRAWN"],
+    {
+      error: "Status must be ACCEPTED, REJECTED, UNDER_REVIEW, SHORTLISTED, or WITHDRAWN",
+    }
+  ),
 });
 
 export type UpdateProposalStatusInput = z.infer<typeof UpdateProposalStatusSchema>;
+
+export const NegotiateProposalSchema = z.object({
+  proposalId: z
+    .string()
+    .trim()
+    .regex(OBJECT_ID_REGEX, "Invalid Proposal ID. Expected a 24-character hexadecimal ObjectId"),
+  proposedRate: z.number().positive("Proposed rate must be greater than zero"),
+  message: z.string().trim().max(1000).optional().nullable(),
+});
+
+export type NegotiateProposalInput = z.infer<typeof NegotiateProposalSchema>;

@@ -8,6 +8,7 @@ import { getOrCreatePreHireConversationAction } from "@/lib/actions/message";
 import { HireConfirmationModal } from "@/components/dashboard/HireConfirmationModal";
 import { SendInvitationModal } from "@/components/dashboard/SendInvitationModal";
 import { DeclineReasonModal } from "@/components/dashboard/DeclineReasonModal";
+import { NegotiateProposalModal } from "@/components/dashboard/NegotiateProposalModal";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProposalStatus } from "@/types";
 
@@ -73,6 +74,7 @@ export function ClientProposalReview({
   const [hireModalProposal, setHireModalProposal] = useState<ReviewProposalItem | null>(null);
   const [inviteModalProposal, setInviteModalProposal] = useState<ReviewProposalItem | null>(null);
   const [declineModalProposal, setDeclineModalProposal] = useState<ReviewProposalItem | null>(null);
+  const [negotiateModalProposal, setNegotiateModalProposal] = useState<ReviewProposalItem | null>(null);
 
   const isHourly = job.type.toUpperCase() === "HOURLY";
 
@@ -574,12 +576,21 @@ export function ClientProposalReview({
                       </div>
 
                       {/* Decision Action Buttons */}
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => setNegotiateModalProposal(proposal)}
+                          className="inline-flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50/80 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 transition disabled:opacity-50"
+                        >
+                          <span>💬</span>
+                          <span>Negotiate Rate</span>
+                        </button>
                         <button
                           type="button"
                           disabled={isPending}
                           onClick={() => setDeclineModalProposal(proposal)}
-                          className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:border-rose-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-rose-400 dark:hover:bg-rose-950/40 transition disabled:opacity-50"
+                          className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:border-rose-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-rose-400 dark:hover:bg-rose-950/40 transition disabled:opacity-50"
                         >
                           Decline
                         </button>
@@ -587,7 +598,7 @@ export function ClientProposalReview({
                           type="button"
                           disabled={isPending}
                           onClick={() => setHireModalProposal(proposal)}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow hover:bg-emerald-500 transition disabled:opacity-50 active:scale-95"
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow hover:bg-emerald-500 transition disabled:opacity-50 active:scale-95"
                         >
                           <span>Hire Freelancer</span>
                           <span>→</span>
@@ -691,6 +702,28 @@ export function ClientProposalReview({
           }'s proposal for "${job.title}"? This candidate will be notified.`}
           confirmButtonLabel="Decline Proposal"
           showReasonInput={false}
+        />
+      )}
+
+      {/* Negotiate Rate Modal */}
+      {negotiateModalProposal && (
+        <NegotiateProposalModal
+          isOpen={Boolean(negotiateModalProposal)}
+          onClose={() => setNegotiateModalProposal(null)}
+          proposalId={negotiateModalProposal.id}
+          freelancerName={
+            negotiateModalProposal.freelancer.name ||
+            (negotiateModalProposal.freelancer.email ? negotiateModalProposal.freelancer.email.split("@")[0] : "Freelancer")
+          }
+          currentBidAmount={negotiateModalProposal.bidAmount}
+          jobType={job.type}
+          jobTitle={job.title}
+          onSuccess={() => {
+            setSuccessToast({
+              message: "Rate negotiation offer sent to freelancer successfully!",
+            });
+            router.refresh();
+          }}
         />
       )}
     </div>

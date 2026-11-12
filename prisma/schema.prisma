@@ -54,6 +54,7 @@ model Job {
   savedBy               SavedJob[]
   conversations         Conversation[]
   interviewInvitations  InterviewInvitation[]
+  hiringOffers          HiringOffer[]
 
   // Client Snapshot
   clientName            String?
@@ -85,8 +86,11 @@ enum Role {
 
 enum ProposalStatus {
   PENDING
+  UNDER_REVIEW
+  SHORTLISTED
   ACCEPTED
   REJECTED
+  WITHDRAWN
 }
 
 enum ContractStatus {
@@ -159,6 +163,8 @@ model User {
   paymentsReceived    Payment[]      @relation("PaymentsReceived")
   sentInvitations     InterviewInvitation[] @relation("SentInvitations")
   receivedInvitations InterviewInvitation[] @relation("ReceivedInvitations")
+  sentOffers          HiringOffer[]         @relation("ClientOffers")
+  receivedOffers      HiringOffer[]         @relation("FreelancerOffers")
 
   @@index([role, roleSelected])
   @@index([role, isAvailable])
@@ -181,6 +187,7 @@ model Proposal {
   updatedAt         DateTime       @updatedAt
 
   contract          Contract?
+  hiringOffers      HiringOffer[]
 
   @@unique([jobId, freelancerId])
   @@index([jobId])
@@ -217,6 +224,7 @@ model Contract {
 
   milestones        ContractMilestone[]
   conversation      Conversation?
+  hiringOffer       HiringOffer?
   reviews           Review[]
   timeEntries       TimeEntry[]
   timeScreenshots   TimeScreenshot[]
@@ -340,6 +348,13 @@ enum NotificationType {
   INVITATION_ACCEPTED
   INVITATION_DECLINED
   JOB_ALERT
+  HIRING_OFFER
+  OFFER_ACCEPTED
+  OFFER_DECLINED
+  OFFER_COUNTERED
+  PROPOSAL_RECEIVED
+  PROPOSAL_ACCEPTED
+  PROPOSAL_REJECTED
 }
 
 model Notification {
@@ -590,6 +605,76 @@ model EmailVerificationToken {
   @@index([email])
   @@index([expiresAt])
   @@map("email_verification_tokens")
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  COUNTERED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum OfferType {
+  DIRECT_HIRE
+  PROPOSAL_NEGOTIATION
+}
+
+type OfferMilestone {
+  title       String
+  description String?
+  amount      Float
+  dueDate     String?
+}
+
+type NegotiationRound {
+  id          String
+  senderId    String
+  senderRole  Role
+  amount      Float
+  type        PaymentType
+  message     String?
+  createdAt   DateTime @default(now())
+}
+
+model HiringOffer {
+  id                 String             @id @default(auto()) @map("_id") @db.ObjectId
+  clientId           String             @db.ObjectId
+  client             User               @relation("ClientOffers", fields: [clientId], references: [id])
+  freelancerId       String             @db.ObjectId
+  freelancer         User               @relation("FreelancerOffers", fields: [freelancerId], references: [id])
+  jobId              String?            @db.ObjectId
+  job                Job?               @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  proposalId         String?            @db.ObjectId
+  proposal           Proposal?          @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  contractId         String?            @unique @db.ObjectId
+  contract           Contract?          @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  title              String
+  description        String
+  type               PaymentType        @default(FIXED)
+  amount             Float
+  duration           String?
+  startDate          DateTime?          @default(now())
+  milestones         OfferMilestone[]
+  negotiationHistory NegotiationRound[]
+
+  status             OfferStatus        @default(PENDING)
+  offerType          OfferType          @default(DIRECT_HIRE)
+  lastActionBy       String?            @db.ObjectId
+
+  message            String?
+  declineReason      String?
+
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([clientId, status])
+  @@index([freelancerId, status])
+  @@index([jobId])
+  @@index([proposalId])
+  @@map("hiring_offers")
 }
 
 // Composite types for MongoDB embedded documents (Phase 5 Freelancer Profiles)

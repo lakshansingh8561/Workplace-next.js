@@ -4,21 +4,32 @@ import { connection } from "next/server";
 import { requireRole } from "@/lib/session";
 import { Role } from "@prisma/client";
 import { getMyInvitationsAction } from "@/lib/actions/invitation";
+import { getHiringOffersForUserAction } from "@/lib/actions/hiring-offer";
 import { FreelancerInvitationsView } from "@/components/dashboard/FreelancerInvitationsView";
 
 export const metadata: Metadata = {
-  title: "Interview Invitations | WorkPulse",
-  description: "Review and respond to client interview invitations on WorkPulse.",
+  title: "Offers & Invitations | WorkPulse",
+  description: "Review, accept, or negotiate direct hiring offers and client interview invitations.",
 };
 
 async function FreelancerInvitationsContent() {
   await connection();
   await requireRole(Role.FREELANCER, "/login");
 
-  const res = await getMyInvitationsAction({ limit: 50 });
-  const invitations = res.invitations || [];
+  const [invRes, offerRes] = await Promise.all([
+    getMyInvitationsAction({ limit: 50 }),
+    getHiringOffersForUserAction(),
+  ]);
 
-  return <FreelancerInvitationsView initialInvitations={invitations} />;
+  const invitations = invRes.invitations || [];
+  const offers = offerRes.offers || [];
+
+  return (
+    <FreelancerInvitationsView
+      initialInvitations={invitations}
+      initialOffers={offers}
+    />
+  );
 }
 
 export default function FreelancerInvitationsPage() {
