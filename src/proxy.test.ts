@@ -185,6 +185,7 @@ describe("SEC-01: Centralized Route Protection Proxy", () => {
           origin,
         },
         auth: mockSession,
+        
       });
 
       expect(response.status).toBe(200);

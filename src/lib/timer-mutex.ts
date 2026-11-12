@@ -73,7 +73,7 @@ export async function acquireDatabaseTimerReservation(
   if (tx.timeEntry) {
     const activeEntry = await tx.timeEntry.findFirst({
       where: {
-        freelancerId,
+        freelancerId, 
         status: { in: [TimeTrackingStatus.RECORDING, TimeTrackingStatus.PAUSED] },
       },
       select: { id: true, status: true, contractId: true },
