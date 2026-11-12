@@ -203,44 +203,15 @@ export async function verifyUserForAction(
   }
 
   let isVerified = false;
-  if (user.emailVerified) {
-    try {
-      const { prisma } = await import("@/lib/prisma");
-      const dbUser = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { emailVerified: true },
-      });
-      isVerified = dbUser ? Boolean(dbUser.emailVerified) : true;
-    } catch {
-      isVerified = true;
-    }
-  } else if (user.emailVerified === null) {
-    // In non-production local development environments, permit active test accounts
-    if (process.env.NODE_ENV !== "production") {
-      isVerified = true;
-    } else {
-      try {
-        const { prisma } = await import("@/lib/prisma");
-        const dbUser = await prisma.user.findUnique({
-          where: { id: user.id },
-          select: { emailVerified: true },
-        });
-        isVerified = Boolean(dbUser?.emailVerified);
-      } catch {
-        isVerified = false;
-      }
-    }
-  } else {
-    try {
-      const { prisma } = await import("@/lib/prisma");
-      const dbUser = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { emailVerified: true },
-      });
-      isVerified = dbUser ? Boolean(dbUser.emailVerified) : true;
-    } catch {
-      isVerified = true;
-    }
+  try {
+    const { prisma } = await import("@/lib/prisma");
+    const dbUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { emailVerified: true },
+    });
+    isVerified = Boolean(dbUser?.emailVerified);
+  } catch {
+    isVerified = Boolean(user.emailVerified);
   }
 
   if (!isVerified) {

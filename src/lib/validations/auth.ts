@@ -132,6 +132,30 @@ export const ResendVerificationSchema = z.object({
 
 export type ResendVerificationInput = z.infer<typeof ResendVerificationSchema>;
 
+export const VerifyEmailOtpSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Please enter a valid email address"),
+  otp: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Verification code must be exactly 6 digits"),
+});
+
+export type VerifyEmailOtpInput = z.infer<typeof VerifyEmailOtpSchema>;
+
+export const SendEmailOtpSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Please enter a valid email address"),
+});
+
+export type SendEmailOtpInput = z.infer<typeof SendEmailOtpSchema>;
+
 export const ChangePasswordSchema = z
   .object({
     currentPassword: z.string().min(1, "Current password is required"),

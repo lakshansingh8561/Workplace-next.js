@@ -633,3 +633,18 @@ type Certification {
   credentialUrl String?
 }
 
+type SavedSearch {
+  id            String
+  name          String
+  query         String?
+  category      String?
+  type          String?
+  experience    String?
+  skills        String[] @default([])
+  minBudget     Float?
+  maxBudget     Float?
+  alertsEnabled Boolean  @default(true)
+  createdAt     DateTime @default(now())
+}
+
+

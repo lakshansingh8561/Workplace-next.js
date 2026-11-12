@@ -68,6 +68,8 @@ export const CreateJobSchema = z
     experienceLevel: z.enum(["ENTRY", "INTERMEDIATE", "EXPERT"], {
       error: "Please select an experience level",
     }),
+    status: z.enum(["OPEN", "DRAFT"]).optional().default("OPEN"),
+    scheduledPublishAt: z.string().optional().nullable(),
   })
   .superRefine((data, ctx) => {
     if (data.type === "FIXED") {
@@ -122,4 +124,13 @@ export const UpdateJobStatusSchema = z.object({
 });
 
 export type UpdateJobStatusInput = z.infer<typeof UpdateJobStatusSchema>;
+
+export const UpdateJobSchema = CreateJobSchema.extend({
+  jobId: z
+    .string()
+    .trim()
+    .regex(OBJECT_ID_REGEX, "Invalid Job ID. Expected a 24-character hexadecimal ObjectId"),
+});
+
+export type UpdateJobInput = z.infer<typeof UpdateJobSchema>;
 

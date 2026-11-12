@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Job } from "@/types";
 import { unsaveJobAction } from "@/lib/actions/savedJob";
+import { SavedSearchItem } from "@/lib/actions/saved-search";
+import { SavedSearchesView } from "./SavedSearchesView";
 
 export interface SavedJobViewItem {
   id: string; // savedJob record ID
@@ -14,9 +16,14 @@ export interface SavedJobViewItem {
 
 interface SavedJobsViewProps {
   initialSavedJobs: SavedJobViewItem[];
+  initialSavedSearches?: SavedSearchItem[];
 }
 
-export function SavedJobsView({ initialSavedJobs }: SavedJobsViewProps) {
+export function SavedJobsView({
+  initialSavedJobs,
+  initialSavedSearches = [],
+}: SavedJobsViewProps) {
+  const [activeTab, setActiveTab] = useState<"jobs" | "searches">("jobs");
   const [savedJobs, setSavedJobs] = useState<SavedJobViewItem[]>(initialSavedJobs);
   const [activeUnsavingId, setActiveUnsavingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -71,17 +78,52 @@ export function SavedJobsView({ initialSavedJobs }: SavedJobsViewProps) {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-950 dark:text-white">
-              Saved Jobs
+              {activeTab === "jobs" ? "Saved Jobs" : "Saved Searches & Alerts"}
             </h1>
             <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-              {savedJobs.length} {savedJobs.length === 1 ? "Job Saved" : "Jobs Saved"}
+              {activeTab === "jobs"
+                ? `${savedJobs.length} Saved`
+                : `${initialSavedSearches.length} Searches`}
             </span>
           </div>
           <p className="mt-1.5 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
-            Keep track of promising freelance opportunities and apply when ready.
+            {activeTab === "jobs"
+              ? "Keep track of promising freelance opportunities and apply when ready."
+              : "Manage your saved search filters and job alert preferences."}
           </p>
         </div>
+
+        {/* Tab Switcher */}
+        <div className="flex items-center gap-1.5 rounded-2xl bg-zinc-100 p-1 dark:bg-zinc-800/80">
+          <button
+            type="button"
+            onClick={() => setActiveTab("jobs")}
+            className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
+              activeTab === "jobs"
+                ? "bg-white text-zinc-950 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
+            }`}
+          >
+            📌 Saved Jobs ({savedJobs.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("searches")}
+            className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
+              activeTab === "searches"
+                ? "bg-white text-zinc-950 shadow-xs dark:bg-zinc-900 dark:text-white"
+                : "text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
+            }`}
+          >
+            🔔 Searches & Alerts ({initialSavedSearches.length})
+          </button>
+        </div>
       </div>
+
+      {activeTab === "searches" ? (
+        <SavedSearchesView initialSearches={initialSavedSearches} />
+      ) : (
+        <>
 
       {/* Ephemeral Feedback Notices */}
       {successNotice && (
@@ -273,6 +315,8 @@ export function SavedJobsView({ initialSavedJobs }: SavedJobsViewProps) {
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );

@@ -38,7 +38,7 @@ export function SignupForm() {
           setFieldErrors(result.fieldErrors);
         }
       } else {
-        router.push("/login?registered=true");
+        router.push(`/verify-email?email=${encodeURIComponent(email)}`);
       }
     });
   };

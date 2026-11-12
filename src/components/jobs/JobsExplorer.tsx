@@ -13,6 +13,7 @@ import { JobFilters } from "./JobFilters";
 import { JobPagination } from "./JobPagination";
 import { JobSkeleton } from "./JobSkeleton";
 import { getSavedJobIdsAction } from "@/lib/actions/savedJob";
+import { SaveSearchModal } from "./SaveSearchModal";
 
 export function JobsExplorer() {
   const router = useRouter();
@@ -47,6 +48,8 @@ export function JobsExplorer() {
   const [error, setError] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
 
   if (prevSearchParam !== searchParam) {
     setPrevSearchParam(searchParam);
@@ -286,7 +289,29 @@ export function JobsExplorer() {
           >
             <span>Search</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setIsSaveModalOpen(true)}
+            className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 flex items-center justify-center gap-1.5 whitespace-nowrap active:scale-95"
+            title="Save this search and receive automated job alerts"
+          >
+            <span>🔔</span>
+            <span className="hidden sm:inline">Save Search</span>
+          </button>
         </form>
+
+        {saveToast && (
+          <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+            <span>✓ {saveToast}</span>
+            <button
+              type="button"
+              onClick={() => setSaveToast(null)}
+              className="text-emerald-700 hover:text-emerald-900 font-bold"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Mobile Filter Toggle Button */}
         <div className="mt-4 flex sm:hidden items-center justify-between">
@@ -499,6 +524,27 @@ export function JobsExplorer() {
           )}
         </div>
       </div>
+
+      {/* Save Search & Job Alerts Modal */}
+      {isSaveModalOpen && (
+        <SaveSearchModal
+          isOpen={isSaveModalOpen}
+          onClose={() => setIsSaveModalOpen(false)}
+          currentParams={{
+            query: searchParam,
+            category: categoryParam,
+            type: typeParam,
+            experienceLevel: expParam,
+            skill: skillParam,
+            minBudget: minBudgetParam,
+            maxBudget: maxBudgetParam,
+          }}
+          onSuccess={() => {
+            setSaveToast("Search criteria saved! You'll receive alerts for matching jobs.");
+            setTimeout(() => setSaveToast(null), 5000);
+          }}
+        />
+      )}
     </div>
   );
 }

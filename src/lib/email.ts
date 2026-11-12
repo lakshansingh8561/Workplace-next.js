@@ -397,3 +397,73 @@ The WorkPulse Team`;
 
   return sendEmail({ to, subject, html, text });
 }
+
+/**
+ * Sends a 6-digit email verification OTP with 10-minute expiration.
+ */
+export async function sendEmailVerificationOtp({
+  to,
+  otp,
+  recipientName,
+}: {
+  to: string;
+  otp: string;
+  recipientName?: string | null;
+}): Promise<EmailDeliveryResult> {
+  const greeting = recipientName ? `Hello ${recipientName},` : "Hello,";
+
+  const subject = `${otp} is your WorkPulse verification code`;
+
+  const text = `${greeting}
+
+Your WorkPulse verification code is: ${otp}
+
+Enter this 6-digit code to complete your email verification and access all marketplace features.
+
+This code will expire in 10 minutes and can only be used once.
+
+If you did not request this verification code, please disregard this email. Your account remains secure.
+
+Best regards,
+The WorkPulse Team`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Your Verification Code</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #09090b; color: #f4f4f5; margin: 0; padding: 40px 20px;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0">
+    <tr>
+      <td align="center">
+        <table width="520" border="0" cellspacing="0" cellpadding="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 36px;">
+          <tr>
+            <td style="padding-bottom: 24px; border-bottom: 1px solid #27272a;">
+              <span style="display: inline-block; width: 36px; height: 36px; line-height: 36px; text-align: center; background-color: #059669; color: #ffffff; font-weight: bold; border-radius: 8px; font-size: 18px;">W</span>
+              <span style="font-size: 18px; font-weight: 700; color: #ffffff; margin-left: 10px; vertical-align: middle;">WorkPulse</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-top: 24px;">
+              <h2 style="color: #ffffff; font-size: 20px; font-weight: 600; margin-top: 0; margin-bottom: 12px;">Confirm your email address</h2>
+              <p style="color: #a1a1aa; font-size: 14px; line-height: 22px; margin-top: 0; margin-bottom: 20px;">${greeting}</p>
+              <p style="color: #a1a1aa; font-size: 14px; line-height: 22px; margin-top: 0; margin-bottom: 24px;">Enter the following 6-digit verification code to verify your WorkPulse account and activate proposal submissions, hiring, and messaging:</p>
+              <div style="margin: 28px 0; text-align: center;">
+                <div style="display: inline-block; background-color: #27272a; border: 2px solid #059669; border-radius: 12px; padding: 14px 28px;">
+                  <span style="font-family: monospace; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #10b981;">${otp}</span>
+                </div>
+              </div>
+              <p style="color: #71717a; font-size: 12px; line-height: 18px; margin-top: 24px; margin-bottom: 8px;">This code will expire in <strong>10 minutes</strong> and can only be used once.</p>
+              <p style="color: #71717a; font-size: 12px; line-height: 18px; margin: 0;">If you didn't create a WorkPulse account, you can safely ignore this email.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+ </body>
+</html>`;
+
+  return sendEmail({ to, subject, html, text });
+}

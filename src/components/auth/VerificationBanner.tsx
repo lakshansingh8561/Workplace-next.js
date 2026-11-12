@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { resendVerificationEmailAction } from "@/lib/actions/auth-recovery";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { sendEmailVerificationOtpAction } from "@/lib/actions/auth-recovery";
 
 interface VerificationBannerProps {
   email?: string | null;
@@ -12,6 +14,7 @@ export function VerificationBanner({
   email,
   isVerified,
 }: VerificationBannerProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [sentMessage, setSentMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -22,17 +25,17 @@ export function VerificationBanner({
     return null;
   }
 
-  const handleResend = () => {
+  const handleSendOtpAndNavigate = () => {
     setErrorMessage(null);
     setSentMessage(null);
 
     startTransition(async () => {
       try {
-        const result = await resendVerificationEmailAction({ email });
+        const result = await sendEmailVerificationOtpAction({ email });
         if (result.success) {
-          setSentMessage("A new verification link has been sent to your inbox.");
+          router.push(`/verify-email?email=${encodeURIComponent(email)}`);
         } else {
-          setErrorMessage(result.error || "Failed to resend verification email.");
+          setErrorMessage(result.error || "Failed to send verification code.");
         }
       } catch {
         setErrorMessage("An unexpected error occurred. Please try again.");
@@ -76,14 +79,22 @@ export function VerificationBanner({
               {errorMessage}
             </span>
           ) : (
-            <button
-              type="button"
-              onClick={handleResend}
-              disabled={isPending}
-              className="font-semibold text-amber-900 underline hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-100 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
-            >
-              {isPending ? "Sending link..." : "Resend verification link"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSendOtpAndNavigate}
+                disabled={isPending}
+                className="font-bold text-white bg-amber-600 hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-600 px-3 py-1 rounded-lg shadow-xs disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition"
+              >
+                {isPending ? "Sending OTP..." : "Verify Now (Enter OTP)"}
+              </button>
+              <Link
+                href={`/verify-email?email=${encodeURIComponent(email)}`}
+                className="font-medium text-amber-900 underline hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-100"
+              >
+                I already have a code
+              </Link>
+            </div>
           )}
 
           <button

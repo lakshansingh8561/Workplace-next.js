@@ -168,7 +168,7 @@ export async function sendInterviewInvitationAction(
       };
     }
 
-    // 3. Check for existing invitation (MVP enforces exactly one invitation per job/freelancer)
+    // 3. Check for existing invitation: prevent duplicate active invitations
     const existingInvitation = await prisma.interviewInvitation.findUnique({
       where: {
         jobId_freelancerId: {
@@ -176,14 +176,22 @@ export async function sendInterviewInvitationAction(
           freelancerId,
         },
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, conversationId: true },
     });
 
     if (existingInvitation) {
-      return {
-        success: false,
-        error: "An interview invitation has already been sent to this freelancer for this job.",
-      };
+      if (existingInvitation.status === "PENDING") {
+        return {
+          success: false,
+          error: "An interview invitation has already been sent to this freelancer for this job.",
+        };
+      }
+      if (existingInvitation.status === "ACCEPTED") {
+        return {
+          success: false,
+          error: "This freelancer has already accepted an interview invitation for this job.",
+        };
+      }
     }
 
     // 4. Atomic multi-document transaction: Conversation + InterviewInvitation + Initial Message
@@ -198,10 +206,10 @@ export async function sendInterviewInvitationAction(
             freelancerId,
           },
         },
-        select: { id: true },
+        select: { id: true, status: true },
       });
 
-      if (concurrentInv) {
+      if (concurrentInv && (concurrentInv.status === "PENDING" || concurrentInv.status === "ACCEPTED")) {
         throw new Error("An interview invitation has already been sent to this freelancer for this job.");
       }
 
@@ -229,19 +237,35 @@ export async function sendInterviewInvitationAction(
         });
       }
 
-      // Create interview invitation record
-      const invitation = await tx.interviewInvitation.create({
-        data: {
-          jobId,
-          clientId: user.id,
-          freelancerId,
-          conversationId: conversation.id,
-          message,
-          status: "PENDING",
-          expiresAt,
-        },
-        select: { id: true },
-      });
+      // Create or renew interview invitation record
+      let invitationId: string;
+      if (concurrentInv) {
+        const renewed = await tx.interviewInvitation.update({
+          where: { id: concurrentInv.id },
+          data: {
+            message,
+            status: "PENDING",
+            expiresAt,
+            respondedAt: null,
+          },
+          select: { id: true },
+        });
+        invitationId = renewed.id;
+      } else {
+        const created = await tx.interviewInvitation.create({
+          data: {
+            jobId,
+            clientId: user.id,
+            freelancerId,
+            conversationId: conversation.id,
+            message,
+            status: "PENDING",
+            expiresAt,
+          },
+          select: { id: true },
+        });
+        invitationId = created.id;
+      }
 
       // Dispatch introductory message into the conversation thread
       await tx.message.create({
@@ -259,7 +283,7 @@ export async function sendInterviewInvitationAction(
       });
 
       return {
-        invitationId: invitation.id,
+        invitationId,
         conversationId: conversation.id,
       };
     });
@@ -667,32 +691,37 @@ export async function getMyInvitationsAction(
       },
     });
 
-    const invitations: InvitationDto[] = rawInvitations.map((inv) => ({
-      id: inv.id,
-      jobId: inv.jobId,
-      clientId: inv.clientId,
-      freelancerId: inv.freelancerId,
-      conversationId: inv.conversationId,
-      message: inv.message,
-      status: inv.status,
-      expiresAt: inv.expiresAt.toISOString(),
-      respondedAt: inv.respondedAt ? inv.respondedAt.toISOString() : null,
-      createdAt: inv.createdAt.toISOString(),
-      job: inv.job,
-      counterparty: isClient
-        ? {
-            id: inv.freelancer.id,
-            name: inv.freelancer.name,
-            image: inv.freelancer.image,
-            role: "FREELANCER",
-          }
-        : {
-            id: inv.client.id,
-            name: inv.client.name,
-            image: inv.client.image,
-            role: "CLIENT",
-          },
-    }));
+    const invitations: InvitationDto[] = rawInvitations.map((inv) => {
+      const isPastExpiry = inv.status === "PENDING" && new Date(inv.expiresAt) < new Date();
+      const effectiveStatus = isPastExpiry ? "EXPIRED" : inv.status;
+
+      return {
+        id: inv.id,
+        jobId: inv.jobId,
+        clientId: inv.clientId,
+        freelancerId: inv.freelancerId,
+        conversationId: inv.conversationId,
+        message: inv.message,
+        status: effectiveStatus,
+        expiresAt: inv.expiresAt.toISOString(),
+        respondedAt: inv.respondedAt ? inv.respondedAt.toISOString() : null,
+        createdAt: inv.createdAt.toISOString(),
+        job: inv.job,
+        counterparty: isClient
+          ? {
+              id: inv.freelancer.id,
+              name: inv.freelancer.name,
+              image: inv.freelancer.image,
+              role: "FREELANCER",
+            }
+          : {
+              id: inv.client.id,
+              name: inv.client.name,
+              image: inv.client.image,
+              role: "CLIENT",
+            },
+      };
+    });
 
     return {
       success: true,

@@ -46,39 +46,49 @@ async function ClientProfileContent({ params }: ClientProfilePageProps) {
   await connection();
   const { id } = await params;
 
-  const [rawClient, reviewsSummary, currentUser, openJobsRaw] = await Promise.all([
-    getClientPublicProfile(id),
-    getUserReviewsSummary(id),
-    getCurrentUser(),
-    prisma.job.findMany({
-      where: {
-        clientId: id,
-        status: "OPEN",
-      },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        category: true,
-        skills: true,
-        type: true,
-        budget: true,
-        hourlyMin: true,
-        hourlyMax: true,
-        duration: true,
-        experienceLevel: true,
-        proposalsCount: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-  ]);
+  const [rawClient, reviewsSummary, currentUser, openJobsRaw, completedContractsCount, totalContractsCount] =
+    await Promise.all([
+      getClientPublicProfile(id),
+      getUserReviewsSummary(id),
+      getCurrentUser(),
+      prisma.job.findMany({
+        where: {
+          clientId: id,
+          status: "OPEN",
+        },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          category: true,
+          skills: true,
+          type: true,
+          budget: true,
+          hourlyMin: true,
+          hourlyMax: true,
+          duration: true,
+          experienceLevel: true,
+          proposalsCount: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.contract.count({
+        where: { clientId: id, status: "COMPLETED" },
+      }),
+      prisma.contract.count({
+        where: { clientId: id },
+      }),
+    ]);
 
   if (!rawClient) {
     notFound();
   }
 
   const isOwner = currentUser?.id === rawClient.id;
+  const totalJobsCount = rawClient._count.jobs;
+  const hireRate = totalJobsCount > 0 ? Math.round((totalContractsCount / totalJobsCount) * 100) : 0;
+  const paymentVerified = totalContractsCount > 0;
 
   const openJobs: PublicClientJobItem[] = openJobsRaw.map((j) => ({
     id: j.id,
@@ -116,8 +126,12 @@ async function ClientProfileContent({ params }: ClientProfilePageProps) {
     companyWebsite: rawClient.companyWebsite || null,
     location: rawClient.location || null,
     createdAt: rawClient.createdAt.toISOString(),
-    totalJobsCount: rawClient._count.jobs,
+    totalJobsCount,
     openJobs,
+    completedContractsCount,
+    totalHiresCount: totalContractsCount,
+    hireRate,
+    paymentVerified,
   };
 
   return (

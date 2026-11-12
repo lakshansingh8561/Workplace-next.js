@@ -72,6 +72,13 @@ export function JobDetailsView({
     }
   }, [user?.role, userProposal, jobId]);
 
+  // Automatically open proposal modal if navigated with #propose
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.hash === "#propose") {
+      setShowApplyModal(true);
+    }
+  }, []);
+
   useEffect(() => {
     // Only fetch via API if initialJob wasn't provided or job is missing
     if (initialJob || fetchedJob) return;

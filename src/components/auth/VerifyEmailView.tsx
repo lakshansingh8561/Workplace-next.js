@@ -1,30 +1,40 @@
 "use client";
 
-import { useEffect, useState, useTransition, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState, useTransition, useCallback, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   verifyEmailAction,
-  resendVerificationEmailAction,
+  sendEmailVerificationOtpAction,
+  verifyEmailOtpAction,
 } from "@/lib/actions/auth-recovery";
 
 export function VerifyEmailView() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
+  const emailParam = searchParams.get("email") || "";
+  const isRequired = searchParams.get("required") === "true";
 
   const [, startTransition] = useTransition();
+  const [isOtpPending, startOtpTransition] = useTransition();
+  const [isResendPending, startResendTransition] = useTransition();
+
   const [status, setStatus] = useState<
-    "verifying" | "success" | "alreadyVerified" | "expired" | "error" | "idle"
-  >(token ? "verifying" : "idle");
+    "verifying_token" | "otp_entry" | "success" | "alreadyVerified" | "expired" | "error"
+  >(token ? "verifying_token" : "otp_entry");
+
+  const [email, setEmail] = useState(emailParam);
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Resend form state
-  const [resendEmail, setResendEmail] = useState("");
-  const [resendPending, startResendTransition] = useTransition();
-  const [resendSent, setResendSent] = useState(false);
-  const [resendError, setResendError] = useState<string | null>(null);
+  // Resend countdown state (starts at 60s if email was just registered, else 0)
+  const [resendCooldown, setResendCooldown] = useState(emailParam ? 60 : 0);
+  const otpInputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
-  const handleVerify = useCallback((tokenToVerify: string) => {
+  // If token is present in URL (legacy verification link)
+  const handleVerifyToken = useCallback((tokenToVerify: string) => {
     startTransition(async () => {
       try {
         const result = await verifyEmailAction({ token: tokenToVerify });
@@ -53,26 +63,153 @@ export function VerifyEmailView() {
 
   useEffect(() => {
     if (token) {
-      handleVerify(token);
+      handleVerifyToken(token);
     }
-  }, [token, handleVerify]);
+  }, [token, handleVerifyToken]);
 
-  const handleResend = (e: React.FormEvent) => {
+  // If email was not passed, check client auth session fallback
+  useEffect(() => {
+    if (!emailParam && !email) {
+      fetch("/api/auth/session")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((session) => {
+          if (session?.user?.email) {
+            setEmail(session.user.email);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [emailParam, email]);
+
+  // Countdown timer for resend button
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resendCooldown]);
+
+  // Focus first OTP input when entering OTP mode
+  useEffect(() => {
+    if (status === "otp_entry" && email && otpInputsRef.current[0]) {
+      otpInputsRef.current[0]?.focus();
+    }
+  }, [status, email]);
+
+  const handleOtpChange = (index: number, value: string) => {
+    // Only accept numeric digits
+    const cleaned = value.replace(/\D/g, "");
+
+    // If user pasted a full 6-digit code into one box
+    if (cleaned.length >= 6) {
+      const newOtp = cleaned.slice(0, 6).split("");
+      setOtp(newOtp);
+      otpInputsRef.current[5]?.focus();
+      return;
+    }
+
+    const newOtp = [...otp];
+    newOtp[index] = cleaned.slice(-1);
+    setOtp(newOtp);
+
+    // Auto-advance focus to next digit input
+    if (cleaned && index < 5) {
+      otpInputsRef.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace" && !otp[index] && index > 0) {
+      otpInputsRef.current[index - 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
-    setResendError(null);
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!pasted) return;
+
+    const newOtp = [...otp];
+    for (let i = 0; i < pasted.length; i++) {
+      newOtp[i] = pasted[i];
+    }
+    setOtp(newOtp);
+
+    const targetFocus = Math.min(5, pasted.length);
+    otpInputsRef.current[targetFocus]?.focus();
+  };
+
+  // Submit OTP Verification
+  const handleVerifyOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const fullOtp = otp.join("").trim();
+    if (fullOtp.length !== 6) {
+      setErrorMessage("Please enter all 6 digits of your verification code.");
+      return;
+    }
+
+    if (!email.trim()) {
+      setErrorMessage("Please provide a valid email address.");
+      return;
+    }
+
+    startOtpTransition(async () => {
+      try {
+        const result = await verifyEmailOtpAction({
+          email: email.trim(),
+          otp: fullOtp,
+        });
+
+        if (result.success) {
+          if (result.alreadyVerified) {
+            setStatus("alreadyVerified");
+          } else {
+            setStatus("success");
+            setSuccessMessage("Your email address has been verified successfully!");
+          }
+        } else {
+          setErrorMessage(result.error || "Failed to verify code. Please try again.");
+          if (result.expired) {
+            setStatus("expired");
+          }
+        }
+      } catch {
+        setErrorMessage("An unexpected error occurred during verification. Please try again.");
+      }
+    });
+  };
+
+  // Resend OTP Action
+  const handleResendOtp = () => {
+    if (resendCooldown > 0 || isResendPending || !email.trim()) return;
+
+    setErrorMessage(null);
+    setSuccessMessage(null);
 
     startResendTransition(async () => {
       try {
-        const result = await resendVerificationEmailAction({
-          email: resendEmail,
+        const result = await sendEmailVerificationOtpAction({
+          email: email.trim(),
         });
+
         if (result.success) {
-          setResendSent(true);
+          if (result.alreadyVerified) {
+            setStatus("alreadyVerified");
+          } else {
+            setSuccessMessage("A fresh 6-digit verification code has been sent to your email.");
+            setResendCooldown(60);
+            setOtp(["", "", "", "", "", ""]);
+            otpInputsRef.current[0]?.focus();
+          }
         } else {
-          setResendError(result.error || "Failed to resend verification email.");
+          setErrorMessage(result.error || "Failed to resend verification code.");
         }
       } catch {
-        setResendError("An unexpected error occurred. Please try again.");
+        setErrorMessage("An error occurred while requesting a new code.");
       }
     });
   };
@@ -93,8 +230,8 @@ export function VerifyEmailView() {
           </span>
         </Link>
 
-        {/* State 1: Verifying */}
-        {status === "verifying" && (
+        {/* State 1: Verifying legacy token */}
+        {status === "verifying_token" && (
           <div className="py-6 space-y-4">
             <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-emerald-600 border-t-transparent" />
             <h1 className="text-base font-bold text-zinc-900 dark:text-white">
@@ -124,18 +261,28 @@ export function VerifyEmailView() {
                 />
               </svg>
             </div>
-            <h1 className="text-base font-bold text-zinc-900 dark:text-white">
+            <h1 className="text-lg font-bold text-zinc-900 dark:text-white">
               Email Verified Successfully!
             </h1>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-sm mx-auto">
-              Your email address has been verified. You now have full access to all WorkPulse marketplace features.
+              Your email address ({email}) has been verified. You now have full access to apply for jobs, post requirements, message clients, and execute contracts.
             </p>
-            <div className="pt-2">
-              <Link
-                href="/login?verified=true"
-                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-500 transition-all"
+            <div className="pt-3 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  router.push("/jobs");
+                  router.refresh();
+                }}
+                className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
               >
-                Continue to Sign In
+                Explore Marketplace Jobs →
+              </button>
+              <Link
+                href="/login"
+                className="text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 py-1"
+              >
+                Sign In to Your Account
               </Link>
             </div>
           </div>
@@ -159,140 +306,166 @@ export function VerifyEmailView() {
                 />
               </svg>
             </div>
-            <h1 className="text-base font-bold text-zinc-900 dark:text-white">
+            <h1 className="text-lg font-bold text-zinc-900 dark:text-white">
               Email Already Verified
             </h1>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-sm mx-auto">
-              This email address has already been confirmed. You can sign in and use WorkPulse normally.
+              This account ({email}) is already verified. You can access all WorkPulse features right away.
             </p>
-            <div className="pt-2">
+            <div className="pt-3">
               <Link
-                href="/login"
-                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-500 transition-all"
+                href="/jobs"
+                className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all"
               >
-                Go to Sign In
+                Go to Marketplace
               </Link>
             </div>
           </div>
         )}
 
-        {/* State 4 & 5: Expired, Invalid, or Idle Resend Form */}
-        {(status === "expired" || status === "error" || status === "idle") && (
+        {/* State 4: OTP Entry Form (Primary Workflow) */}
+        {(status === "otp_entry" || status === "expired" || status === "error") && (
           <div className="py-2 text-left">
-            {status !== "idle" && (
-              <div className="text-center mb-6">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 mb-3">
-                  <svg
-                    className="h-6 w-6"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth="2"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
-                    />
-                  </svg>
+            <div className="text-center mb-6">
+              {isRequired && (
+                <div
+                  role="alert"
+                  className="mb-4 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300 font-medium text-left"
+                >
+                  <p className="font-semibold mb-0.5">Verification Required</p>
+                  <p>
+                    Please verify your email address to submit proposals, post contracts, or send direct messages.
+                  </p>
                 </div>
-                <h1 className="text-base font-bold text-zinc-900 dark:text-white mb-1">
-                  {status === "expired"
-                    ? "Verification Link Expired"
-                    : "Invalid Verification Link"}
-                </h1>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {errorMessage ||
-                    "This link is invalid or has already been consumed. Please request a new verification email below."}
-                </p>
-              </div>
-            )}
+              )}
 
-            {status === "idle" && (
-              <div className="text-center mb-6">
-                {searchParams.get("required") === "true" && (
-                  <div
-                    role="alert"
-                    className="mb-4 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300 font-medium text-left"
-                  >
-                    <p className="font-semibold mb-0.5">Email Verification Required</p>
-                    <p>
-                      You must verify your email address to create jobs, submit proposals, send messages, or transact on the marketplace.
-                    </p>
-                  </div>
-                )}
-                <h1 className="text-lg font-bold text-zinc-900 dark:text-white mb-1">
-                  Verify your email
-                </h1>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Enter your email address to receive a fresh verification link.
-                </p>
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 mb-3 border border-emerald-100 dark:border-emerald-900">
+                <span className="text-xl">✉️</span>
               </div>
-            )}
 
-            {resendError && (
+              <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white mb-1.5">
+                Verify Your Email Address
+              </h1>
+
+              {email ? (
+                <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                  Enter the 6-digit code sent to{" "}
+                  <strong className="font-semibold text-zinc-900 dark:text-zinc-100 break-all">
+                    {email}
+                  </strong>
+                </p>
+              ) : (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Enter your email address and 6-digit verification code below.
+                </p>
+              )}
+            </div>
+
+            {errorMessage && (
               <div
                 role="alert"
-                className="mb-4 rounded-xl border border-red-200 bg-red-50/80 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400 font-medium"
+                className="mb-4 rounded-xl border border-red-200 bg-red-50/80 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400 font-medium text-center"
               >
-                {resendError}
+                {errorMessage}
               </div>
             )}
 
-            {resendSent ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-xs text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-400 text-center">
-                <p className="font-semibold mb-1">Verification link sent!</p>
-                <p className="text-zinc-600 dark:text-zinc-400 mb-3">
-                  If an account exists for <span className="font-semibold text-zinc-900 dark:text-zinc-200">{resendEmail}</span>, a new verification link has been sent.
-                </p>
-                <Link
-                  href="/login"
-                  className="font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
-                >
-                  Return to Sign In
-                </Link>
+            {successMessage && (
+              <div
+                role="status"
+                className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-3 text-xs text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300 font-medium text-center"
+              >
+                ✓ {successMessage}
               </div>
-            ) : (
-              <form onSubmit={handleResend} className="space-y-4">
+            )}
+
+            <form onSubmit={handleVerifyOtp} className="space-y-5">
+              {!emailParam && (
                 <div>
                   <label
-                    htmlFor="resend-email"
+                    htmlFor="verify-email-input"
                     className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1"
                   >
                     Email Address
                   </label>
                   <input
-                    id="resend-email"
+                    id="verify-email-input"
                     type="email"
                     required
-                    value={resendEmail}
-                    onChange={(e) => setResendEmail(e.target.value)}
-                    placeholder="you@company.com"
-                    disabled={resendPending}
-                    className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white disabled:opacity-50"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
                   />
                 </div>
+              )}
 
-                <button
-                  type="submit"
-                  disabled={resendPending || !resendEmail.trim()}
-                  className="w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              {/* 6 Digit Inputs */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-2 text-center">
+                  6-Digit Verification Code
+                </label>
+                <div
+                  className="flex items-center justify-center gap-2 sm:gap-2.5"
+                  onPaste={handleOtpPaste}
                 >
-                  {resendPending
-                    ? "Sending verification link..."
-                    : "Send Verification Link"}
-                </button>
-
-                <div className="text-center pt-2">
-                  <Link
-                    href="/login"
-                    className="text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-                  >
-                    ← Back to Sign In
-                  </Link>
+                  {otp.map((digit, idx) => (
+                    <input
+                      key={idx}
+                      ref={(el) => {
+                        otpInputsRef.current[idx] = el;
+                      }}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handleOtpChange(idx, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                      disabled={isOtpPending}
+                      aria-label={`Digit ${idx + 1}`}
+                      className="h-12 w-11 sm:h-13 sm:w-12 text-center text-xl font-bold font-mono rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-900 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:focus:bg-zinc-900 transition-all disabled:opacity-50"
+                    />
+                  ))}
                 </div>
-              </form>
-            )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={isOtpPending || otp.join("").length !== 6 || !email.trim()}
+                className="w-full rounded-xl bg-emerald-600 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isOtpPending ? "Verifying code..." : "Verify & Continue"}
+              </button>
+
+              {/* Resend Section */}
+              <div className="pt-2 text-center border-t border-zinc-100 dark:border-zinc-800">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1.5">
+                  Didn&apos;t receive the code?
+                </p>
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={resendCooldown > 0 || isResendPending || !email.trim()}
+                  className="text-xs font-bold text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition"
+                >
+                  {isResendPending
+                    ? "Sending code..."
+                    : resendCooldown > 0
+                    ? `Resend code in ${resendCooldown}s`
+                    : "Resend Code"}
+                </button>
+              </div>
+
+              <div className="text-center pt-2">
+                <Link
+                  href="/login"
+                  className="text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  ← Back to Sign In
+                </Link>
+              </div>
+            </form>
           </div>
         )}
       </div>

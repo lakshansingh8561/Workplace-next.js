@@ -37,6 +37,10 @@ export interface PublicClientProfileData {
   createdAt: string;
   totalJobsCount: number;
   openJobs: PublicClientJobItem[];
+  completedContractsCount?: number;
+  totalHiresCount?: number;
+  hireRate?: number;
+  paymentVerified?: boolean;
 }
 
 interface PublicClientProfileViewProps {
@@ -187,26 +191,46 @@ export function PublicClientProfileView({
             )}
 
             {/* Hiring Stats */}
-            <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800 grid grid-cols-2 gap-4 text-center">
+            <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
               <div>
-                <p className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Open Jobs</p>
-                <p className="mt-1 text-base font-extrabold text-emerald-600 dark:text-emerald-400">
+                <p className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">Open Jobs</p>
+                <p className="mt-1 text-sm font-extrabold text-emerald-600 dark:text-emerald-400">
                   {client.openJobs.length}
                 </p>
               </div>
               <div>
-                <p className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Total Posted</p>
-                <p className="mt-1 text-base font-extrabold text-zinc-900 dark:text-white">
+                <p className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">Total Posted</p>
+                <p className="mt-1 text-sm font-extrabold text-zinc-900 dark:text-white">
                   {client.totalJobsCount}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">Completed</p>
+                <p className="mt-1 text-sm font-extrabold text-zinc-900 dark:text-white">
+                  {client.completedContractsCount ?? 0}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">Hire Rate</p>
+                <p className="mt-1 text-sm font-extrabold text-emerald-600 dark:text-emerald-400">
+                  {client.hireRate ?? 0}%
                 </p>
               </div>
             </div>
 
             {/* Verification Pill */}
-            <div className="mt-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 p-3 text-center">
-              <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center justify-center gap-1.5">
+            <div className={`mt-5 rounded-2xl p-3 text-center border ${
+              client.paymentVerified
+                ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/80"
+                : "bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700"
+            }`}>
+              <span className={`text-xs font-bold flex items-center justify-center gap-1.5 ${
+                client.paymentVerified
+                  ? "text-emerald-800 dark:text-emerald-300"
+                  : "text-zinc-600 dark:text-zinc-400"
+              }`}>
                 <span>💳</span>
-                <span>Payment Method Verified</span>
+                <span>{client.paymentVerified ? "Payment Method Verified" : "Payment Verification in Progress"}</span>
               </span>
             </div>
 

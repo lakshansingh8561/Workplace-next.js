@@ -118,6 +118,12 @@ export function ClientDashboardView({
 
         <div className="flex items-center gap-3">
           <Link
+            href="/dashboard/client/invitations"
+            className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-bold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 transition active:scale-95 whitespace-nowrap shrink-0"
+          >
+            📨 Sent Invitations
+          </Link>
+          <Link
             href="/profile/client"
             className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-bold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 transition active:scale-95 whitespace-nowrap shrink-0"
           >
@@ -150,7 +156,7 @@ export function ClientDashboardView({
       <div className="mt-6 flex flex-col md:flex-row gap-4 justify-between items-stretch md:items-center">
         {/* Status Tab Filters */}
         <div className="flex flex-wrap gap-2">
-          {["ALL", "OPEN", "PAUSED", "CLOSED"].map((status) => {
+          {["ALL", "OPEN", "PAUSED", "DRAFT", "CLOSED"].map((status) => {
             const isSelected =
               status === "ALL" ? !currentStatus : currentStatus.toUpperCase() === status;
             return (
@@ -334,10 +340,42 @@ export function ClientDashboardView({
                       </div>
                     )}
 
+                    {job.status === "DRAFT" && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => handleStatusUpdate(job.id, JobStatus.OPEN)}
+                          className="rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition disabled:opacity-50"
+                        >
+                          {isProcessingThis ? "Publishing..." : "Publish"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => handleStatusUpdate(job.id, JobStatus.CLOSED)}
+                          className="rounded-xl border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-950/40 transition disabled:opacity-50"
+                        >
+                          {isProcessingThis ? "Updating..." : "Discard"}
+                        </button>
+                      </div>
+                    )}
+
                     {job.status === "CLOSED" && (
-                      <span className="text-[11px] text-zinc-400 italic">
-                        Archived
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-zinc-400 italic">
+                          Archived
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => handleStatusUpdate(job.id, JobStatus.OPEN)}
+                          className="rounded-xl border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-bold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 transition disabled:opacity-50"
+                          title="Reopen this job posting"
+                        >
+                          {isProcessingThis ? "Reopening..." : "Reopen"}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

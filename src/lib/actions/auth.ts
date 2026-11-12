@@ -17,7 +17,7 @@ import {
   sanitizeRedirectPath,
 } from "@/lib/validations/auth";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
-import { sendVerificationEmail, getAppBaseUrl } from "@/lib/email";
+import { sendVerificationEmail, sendEmailVerificationOtp, getAppBaseUrl } from "@/lib/email";
 
 export type AuthActionResult = {
   success: boolean;
@@ -96,14 +96,14 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
       },
     });
 
-    // Generate secure email verification token (24-hour expiration)
+    // Generate secure 6-digit email verification OTP (10-minute expiration)
     try {
-      const rawVerificationToken = crypto.randomBytes(32).toString("hex");
+      const otp = crypto.randomInt(100000, 1000000).toString();
       const tokenHash = crypto
         .createHash("sha256")
-        .update(rawVerificationToken)
+        .update(otp)
         .digest("hex");
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
       await prisma.emailVerificationToken.create({
         data: {
@@ -113,10 +113,9 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
         },
       });
 
-      const verifyUrl = `${getAppBaseUrl()}/verify-email?token=${rawVerificationToken}`;
-      await sendVerificationEmail({
+      await sendEmailVerificationOtp({
         to: newUser.email,
-        verifyUrl,
+        otp,
         recipientName: newUser.name,
       });
     } catch (emailErr) {
@@ -130,7 +129,7 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
     return {
       success: true,
       message:
-        "Account created successfully. A verification link has been sent to your email.",
+        "Account created successfully. A 6-digit verification code has been sent to your email.",
     };
   } catch (error) {
     if (

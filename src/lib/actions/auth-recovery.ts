@@ -11,10 +11,13 @@ import {
   VerifyEmailSchema,
   ResendVerificationSchema,
   ChangePasswordSchema,
+  VerifyEmailOtpSchema,
+  SendEmailOtpSchema,
 } from "@/lib/validations/auth";
 import {
   sendPasswordResetEmail,
   sendVerificationEmail,
+  sendEmailVerificationOtp,
   getAppBaseUrl,
 } from "@/lib/email";
 
@@ -488,6 +491,263 @@ export async function resendVerificationEmailAction(
       success: true,
       message:
         "If an account exists with that email and requires verification, a new verification link has been sent.",
+    };
+  }
+}
+
+/**
+ * Server Action to dispatch a 6-digit email verification OTP with 10-minute expiration.
+ * Protects against email enumeration and enforces rate limiting & 60-second cooldown.
+ */
+export async function sendEmailVerificationOtpAction(
+  input: unknown
+): Promise<AuthRecoveryResult> {
+  const parsed = SendEmailOtpSchema.safeParse(input);
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: "Please enter a valid email address.",
+    };
+  }
+
+  const email = parsed.data.email.toLowerCase().trim();
+  const clientIp = await getClientIp();
+
+  // Rate limit: 5 requests per 15 minutes per IP & email
+  const rateLimit = await checkRateLimit(`otp-send:${clientIp}:${email}`, {
+    limit: 5,
+    windowMs: 15 * 60 * 1000,
+  });
+
+  if (!rateLimit.success) {
+    return {
+      success: false,
+      error: "Too many verification requests. Please wait 15 minutes before trying again.",
+    };
+  }
+
+  // Cooldown limit: 1 request per 60 seconds per email
+  const cooldown = await checkRateLimit(`otp-cooldown:${email}`, {
+    limit: 1,
+    windowMs: 60 * 1000,
+  });
+
+  if (!cooldown.success) {
+    return {
+      success: false,
+      error: "Please wait 60 seconds before requesting another code.",
+    };
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        emailVerified: true,
+      },
+    });
+
+    if (user && user.emailVerified) {
+      return {
+        success: true,
+        alreadyVerified: true,
+        message: "Your email address is already verified. You can proceed directly.",
+      };
+    }
+
+    // Generate cryptographically secure 6-digit OTP (100000 - 999999)
+    const otp = crypto.randomInt(100000, 1000000).toString();
+
+    // Store only SHA-256 hash (never store raw OTPs)
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(otp)
+      .digest("hex");
+
+    // 10-minute expiration
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    // Invalidate prior OTPs for this email and save new hashed OTP
+    await prisma.$transaction(async (tx) => {
+      await tx.emailVerificationToken.deleteMany({
+        where: { email },
+      });
+
+      await tx.emailVerificationToken.create({
+        data: {
+          email,
+          tokenHash,
+          expiresAt,
+        },
+      });
+    });
+
+    // Send email via configured SMTP (or simulation in test mode)
+    await sendEmailVerificationOtp({
+      to: email,
+      otp,
+      recipientName: user?.name,
+    });
+
+    return {
+      success: true,
+      message: "A 6-digit verification code has been sent to your email address.",
+    };
+  } catch (error) {
+    console.error(
+      "[WorkPulse Send OTP Error]:",
+      error instanceof Error ? error.message : "Database/Email error"
+    );
+
+    return {
+      success: false,
+      error: "Failed to send verification code. Please try again.",
+    };
+  }
+}
+
+/**
+ * Server Action to verify an email address using a 6-digit OTP.
+ * Validates OTP SHA-256 hash, verifies expiration, and updates user emailVerified.
+ */
+export async function verifyEmailOtpAction(
+  input: unknown
+): Promise<AuthRecoveryResult> {
+  const parsed = VerifyEmailOtpSchema.safeParse(input);
+
+  if (!parsed.success) {
+    const firstIssue = parsed.error.issues[0];
+    return {
+      success: false,
+      error: firstIssue?.message || "Invalid verification code.",
+    };
+  }
+
+  const email = parsed.data.email.toLowerCase().trim();
+  const otp = parsed.data.otp.trim();
+  const clientIp = await getClientIp();
+
+  // Rate limit OTP verification attempts to prevent brute force (10 attempts per 10 minutes)
+  const attemptLimit = await checkRateLimit(`otp-verify:${clientIp}:${email}`, {
+    limit: 10,
+    windowMs: 10 * 60 * 1000,
+  });
+
+  if (!attemptLimit.success) {
+    return {
+      success: false,
+      error: "Too many verification attempts. Please wait 10 minutes or request a new code.",
+    };
+  }
+
+  try {
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(otp)
+      .digest("hex");
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Look up token by email and hash
+      const record = await tx.emailVerificationToken.findFirst({
+        where: {
+          email,
+          tokenHash,
+        },
+      });
+
+      if (!record) {
+        return {
+          valid: false,
+          error: "Invalid verification code. Please check your email or request a new code.",
+        };
+      }
+
+      // 2. Check expiration (10 minutes)
+      if (record.expiresAt < new Date()) {
+        await tx.emailVerificationToken.delete({
+          where: { id: record.id },
+        });
+
+        return {
+          valid: false,
+          expired: true,
+          error: "This verification code has expired. Please request a new one.",
+        };
+      }
+
+      // 3. Find matching user
+      const user = await tx.user.findUnique({
+        where: { email },
+        select: { id: true, emailVerified: true },
+      });
+
+      if (!user) {
+        return {
+          valid: false,
+          error: "User associated with this email was not found.",
+        };
+      }
+
+      if (user.emailVerified) {
+        await tx.emailVerificationToken.deleteMany({
+          where: { email },
+        });
+
+        return {
+          valid: true,
+          alreadyVerified: true,
+        };
+      }
+
+      // 4. Mark user email verified
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerified: new Date(),
+        },
+      });
+
+      // 5. Invalidate all verification tokens for this user
+      await tx.emailVerificationToken.deleteMany({
+        where: { email },
+      });
+
+      return { valid: true };
+    });
+
+    if (!result.valid) {
+      return {
+        success: false,
+        error: result.error,
+        expired: result.expired,
+      };
+    }
+
+    if (result.alreadyVerified) {
+      return {
+        success: true,
+        alreadyVerified: true,
+        message: "Your email address is already verified.",
+      };
+    }
+
+    return {
+      success: true,
+      message: "Your email address has been verified successfully. Welcome to WorkPulse!",
+    };
+  } catch (error) {
+    console.error(
+      "[WorkPulse Verify OTP Error]:",
+      error instanceof Error ? error.message : "Database error"
+    );
+
+    return {
+      success: false,
+      error: "Failed to verify code. Please try again.",
     };
   }
 }

@@ -53,6 +53,7 @@ const customAdapter = {
 };
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
   adapter: customAdapter,
   secret: resolvedSecret,
   session: {

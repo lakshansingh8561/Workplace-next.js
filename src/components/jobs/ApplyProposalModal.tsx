@@ -1,7 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { submitProposalAction, SubmitProposalResult } from "@/lib/actions/proposal";
+import {
+  sendEmailVerificationOtpAction,
+  verifyEmailOtpAction,
+} from "@/lib/actions/auth-recovery";
 import { DURATION_OPTIONS } from "@/lib/validations/job";
 import { Job } from "@/types";
 
@@ -36,14 +40,44 @@ export function ApplyProposalModal({
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Email OTP verification state inside modal
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [showOtpFlow, setShowOtpFlow] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
+  const [otpMessage, setOtpMessage] = useState<string | null>(null);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [isOtpPending, startOtpTransition] = useTransition();
+
+  // Fetch session email on mount
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((session) => {
+        if (session?.user?.email) {
+          setUserEmail(session.user.email);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Cooldown countdown
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setOtpCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [otpCooldown]);
+
   if (!isOpen) return null;
 
   const parsedBid = parseFloat(bidAmount) || 0;
   const platformFee = Math.round(parsedBid * 0.1 * 100) / 100;
   const netReceive = Math.max(0, Math.round((parsedBid - platformFee) * 100) / 100);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeSubmission = () => {
     setGeneralError(null);
     setFieldErrors({});
 
@@ -59,7 +93,13 @@ export function ApplyProposalModal({
         if (result.fieldErrors) {
           setFieldErrors(result.fieldErrors);
         }
-        setGeneralError(result.error || "Failed to submit proposal. Please check the form.");
+        const errorMsg = result.error || "Failed to submit proposal. Please check the form.";
+        setGeneralError(errorMsg);
+
+        // If email verification is required, immediately expose inline OTP flow
+        if (errorMsg.toLowerCase().includes("verify your email")) {
+          setShowOtpFlow(true);
+        }
         return;
       }
 
@@ -71,6 +111,68 @@ export function ApplyProposalModal({
           estimatedDuration: estimatedDuration || null,
           createdAt: new Date().toISOString(),
         });
+      }
+    });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    executeSubmission();
+  };
+
+  // Send OTP
+  const handleSendOtp = () => {
+    if (!userEmail) {
+      setOtpError("User email not found. Please verify your account.");
+      return;
+    }
+    setOtpError(null);
+    setOtpMessage(null);
+
+    startOtpTransition(async () => {
+      try {
+        const res = await sendEmailVerificationOtpAction({ email: userEmail });
+        if (res.success) {
+          setOtpSent(true);
+          setOtpCooldown(60);
+          setOtpMessage(res.message || "A 6-digit verification code was sent to your email.");
+        } else {
+          setOtpError(res.error || "Failed to send code. Please try again.");
+        }
+      } catch {
+        setOtpError("An unexpected error occurred while sending verification code.");
+      }
+    });
+  };
+
+  // Verify OTP and then immediately submit the proposal
+  const handleVerifyOtp = () => {
+    const cleanOtp = otpCode.trim();
+    if (cleanOtp.length !== 6) {
+      setOtpError("Please enter all 6 digits.");
+      return;
+    }
+    setOtpError(null);
+    setOtpMessage(null);
+
+    startOtpTransition(async () => {
+      try {
+        const res = await verifyEmailOtpAction({
+          email: userEmail,
+          otp: cleanOtp,
+        });
+
+        if (res.success) {
+          setOtpMessage("Email verified successfully! Submitting proposal...");
+          setShowOtpFlow(false);
+          setGeneralError(null);
+          // Directly submit the proposal with preserved form values
+          executeSubmission();
+        } else {
+          setOtpError(res.error || "Invalid verification code.");
+        }
+      } catch {
+        setOtpError("Failed to verify code. Please try again.");
       }
     });
   };
@@ -117,8 +219,85 @@ export function ApplyProposalModal({
           </button>
         </div>
 
-        {/* Global Error Alert */}
-        {generalError && (
+        {/* Actionable Email Verification Card (Issue 1 Requirement) */}
+        {showOtpFlow && (
+          <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50/90 p-5 dark:border-amber-800 dark:bg-amber-950/40">
+            <div className="flex items-start gap-3">
+              <span className="text-xl shrink-0">✉️</span>
+              <div className="flex-1 text-xs">
+                <h4 className="font-bold text-amber-950 dark:text-amber-200 text-sm">
+                  Verify Your Email to Complete Submission
+                </h4>
+                <p className="mt-1 text-amber-800 dark:text-amber-300">
+                  WorkPulse requires a verified email address to submit proposals.
+                  <strong className="block mt-0.5 font-semibold text-amber-950 dark:text-amber-100">
+                    Your entered proposal data is saved and will not be lost.
+                  </strong>
+                </p>
+
+                {otpError && (
+                  <div className="mt-3 rounded-lg bg-red-100/80 p-2.5 text-red-800 dark:bg-red-950/60 dark:text-red-300 font-semibold">
+                    {otpError}
+                  </div>
+                )}
+
+                {otpMessage && (
+                  <div className="mt-3 rounded-lg bg-emerald-100/80 p-2.5 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-semibold">
+                    ✓ {otpMessage}
+                  </div>
+                )}
+
+                {!otpSent ? (
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleSendOtp}
+                      disabled={isOtpPending}
+                      className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-amber-700 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      {isOtpPending ? "Sending code..." : `Send 6-Digit OTP to ${userEmail || "my email"}`}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        placeholder="123456"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        disabled={isOtpPending}
+                        className="h-10 w-36 rounded-xl border border-amber-300 bg-white px-3 text-center font-mono text-base font-bold tracking-widest text-zinc-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 dark:border-amber-700 dark:bg-zinc-900 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleVerifyOtp}
+                        disabled={isOtpPending || otpCode.trim().length !== 6}
+                        className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition disabled:opacity-50 cursor-pointer"
+                      >
+                        {isOtpPending ? "Verifying..." : "Verify & Submit Now"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSendOtp}
+                        disabled={otpCooldown > 0 || isOtpPending}
+                        className="text-xs font-semibold text-amber-800 underline hover:text-amber-900 dark:text-amber-300 disabled:opacity-50 cursor-pointer ml-2"
+                      >
+                        {otpCooldown > 0 ? `Resend in ${otpCooldown}s` : "Resend Code"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Global Error Alert (Non-verification errors) */}
+        {generalError && !generalError.toLowerCase().includes("verify your email") && (
           <div className="mt-4 rounded-xl bg-red-50 p-4 text-xs font-medium text-red-800 dark:bg-red-950/40 dark:text-red-300 border border-red-200 dark:border-red-900">
             ⚠️ {generalError}
           </div>
@@ -187,7 +366,7 @@ export function ApplyProposalModal({
               htmlFor="estimatedDuration"
               className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1"
             >
-              Estimated Completion Time
+              Estimated Project Duration
             </label>
             <select
               id="estimatedDuration"
@@ -195,11 +374,11 @@ export function ApplyProposalModal({
               value={estimatedDuration}
               onChange={(e) => setEstimatedDuration(e.target.value)}
               disabled={isPending}
-              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+              className="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-xs font-medium text-zinc-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
             >
-              {DURATION_OPTIONS.map((dur) => (
-                <option key={dur} value={dur}>
-                  {dur}
+              {DURATION_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
                 </option>
               ))}
             </select>
@@ -217,30 +396,24 @@ export function ApplyProposalModal({
                 htmlFor="coverLetter"
                 className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300"
               >
-                Cover Letter
+                Cover Letter & Pitch
               </label>
-              <span
-                className={`text-xs ${
-                  coverLetter.trim().length >= 30
-                    ? "text-zinc-400 dark:text-zinc-500"
-                    : "text-amber-600 dark:text-amber-400 font-medium"
-                }`}
-              >
-                {coverLetter.trim().length} / 3,000 characters (min 30)
+              <span className="text-[11px] text-zinc-400">
+                {coverLetter.length} / 5000 characters
               </span>
             </div>
             <textarea
               id="coverLetter"
               name="coverLetter"
-              rows={6}
+              rows={5}
               required
               minLength={30}
-              maxLength={3000}
+              maxLength={5000}
               value={coverLetter}
               onChange={(e) => setCoverLetter(e.target.value)}
               disabled={isPending}
-              placeholder="Introduce yourself, explain your relevant qualifications, and detail how you will deliver this project successfully..."
-              className="w-full rounded-xl border border-zinc-300 bg-white p-3.5 text-sm text-zinc-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white leading-relaxed resize-y"
+              placeholder="Introduce yourself, outline your relevant technical experience, explain how you'll approach this project, and highlight deliverables..."
+              className="w-full rounded-xl border border-zinc-300 bg-white p-3.5 text-xs text-zinc-900 placeholder:text-zinc-400 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
             />
             {fieldErrors.coverLetter && (
               <p className="mt-1 text-xs text-red-600 dark:text-red-400">
@@ -249,37 +422,22 @@ export function ApplyProposalModal({
             )}
           </div>
 
-          {/* Security & Terms Notice */}
-          <div className="rounded-xl bg-zinc-50 p-3 text-xs text-zinc-500 dark:bg-zinc-800/40 dark:text-zinc-400 flex items-center gap-2">
-            <span>🛡️</span>
-            <span>
-              By submitting this proposal, you agree to WorkPulse Terms of Service and Escrow Milestone standards.
-            </span>
-          </div>
-
-          {/* Action Buttons */}
+          {/* Actions */}
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-800">
             <button
               type="button"
               onClick={onClose}
               disabled={isPending}
-              className="rounded-xl bg-zinc-100 px-5 py-2.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 transition dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 disabled:opacity-50"
+              className="rounded-xl border border-zinc-200 bg-white px-5 py-2.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 transition"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isPending || coverLetter.trim().length < 30 || !parsedBid}
-              className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-md hover:bg-emerald-500 transition disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+              disabled={isPending || isOtpPending}
+              className="rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-md hover:bg-emerald-500 transition active:scale-95 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
             >
-              {isPending ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Submitting Proposal...
-                </span>
-              ) : (
-                "Submit Proposal"
-              )}
+              {isPending ? "Submitting..." : "Submit Proposal"}
             </button>
           </div>
         </form>
