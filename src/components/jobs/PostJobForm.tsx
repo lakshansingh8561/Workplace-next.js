@@ -88,12 +88,12 @@ export function PostJobForm({ userName }: PostJobFormProps) {
           setFieldErrors(result.fieldErrors);
         }
       } else if (result.jobId) {
-        router.refresh();
         if (targetStatus === "DRAFT") {
           router.push("/dashboard/client?status=DRAFT");
         } else {
-          router.push(`/jobs/${result.jobId}`);
+          router.push("/dashboard/client");
         }
+        router.refresh();
       }
     });
   };

@@ -34,18 +34,25 @@ export function FreelancerProposalsView({
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState(searchQuery);
   const [activeChatProposalId, setActiveChatProposalId] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   const handleMessageClient = async (proposal: FreelancerProposalItem) => {
     const targetClientId = proposal.job.clientId || proposal.job.client?.id;
-    if (!targetClientId) return;
+    if (!targetClientId && !proposal.job.id) {
+      setChatError("Client information could not be resolved for this proposal.");
+      return;
+    }
     setActiveChatProposalId(proposal.id);
+    setChatError(null);
     try {
-      const res = await getOrCreateDirectConversationAction(targetClientId, proposal.job.id);
+      const res = await getOrCreateDirectConversationAction(targetClientId || "", proposal.job.id);
       if (res.success && res.conversationId) {
         router.push(`/messages?conversationId=${res.conversationId}`);
+      } else {
+        setChatError(res.error || "Unable to open conversation with client.");
       }
-    } catch (err) {
-      console.error("Failed to connect to client chat:", err);
+    } catch {
+      setChatError("Failed to connect to client chat. Please try again.");
     } finally {
       setActiveChatProposalId(null);
     }
@@ -138,6 +145,23 @@ export function FreelancerProposalsView({
           </Link>
         </div>
       </div>
+
+      {/* Messaging Error Banner */}
+      {chatError && (
+        <div className="mt-4 rounded-2xl bg-rose-50 p-4 border border-rose-200 dark:bg-rose-950/40 dark:border-rose-800 text-xs sm:text-sm font-semibold text-rose-800 dark:text-rose-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{chatError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setChatError(null)}
+            className="text-rose-700 hover:text-rose-900 dark:text-rose-400 text-xs font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Controls: Search & Status Filters */}
       <div className="mt-6 flex flex-col md:flex-row gap-4 justify-between items-stretch md:items-center">

@@ -487,7 +487,7 @@ export function Navbar({ user }: NavbarProps) {
           {/* Desktop Navigation Links */}
           <nav
             aria-label="Main Navigation"
-            className="hidden lg:flex items-center gap-3 xl:gap-5 text-sm font-medium"
+            className="hidden lg:flex items-center gap-2.5 xl:gap-4 2xl:gap-5 text-sm font-medium"
           >
             <Suspense fallback={<DesktopNavListStatic user={user} />}>
               <DesktopNavLinks user={user} />
@@ -499,7 +499,7 @@ export function Navbar({ user }: NavbarProps) {
         <div className="hidden sm:flex items-center gap-2 sm:gap-3 shrink-0 ml-auto pl-4">
           <Link
             href="/jobs"
-            className="hidden xl:flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50/80 px-3.5 py-1.5 text-xs text-zinc-500 hover:border-zinc-300 hover:text-zinc-800 transition-colors dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 mr-1 shrink-0"
+            className="hidden 2xl:flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50/80 px-3.5 py-1.5 text-xs text-zinc-500 hover:border-zinc-300 hover:text-zinc-800 transition-colors dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 mr-1 shrink-0"
             aria-label="Quick search talent and skills"
           >
             <svg

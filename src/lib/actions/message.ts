@@ -431,6 +431,31 @@ export async function getOrCreatePreHireConversationAction(
 }
 
 /**
+ * Auto-healing index maintenance for MongoDB:
+ * Ensures the unique index on optional field Conversation.contractId has { sparse: true }
+ * so multiple PRE_HIRE conversations without a contractId can coexist without duplicate null collisions.
+ */
+let hasCheckedSparseContractIndex = false;
+async function ensureSparseContractIndex() {
+  if (hasCheckedSparseContractIndex) return;
+  hasCheckedSparseContractIndex = true;
+  try {
+    const res: any = await prisma.$runCommandRaw({ listIndexes: "conversations" });
+    const indexes = res?.cursor?.firstBatch || [];
+    const contractIdx = indexes.find((i: any) => i.name === "conversations_contractId_key");
+    if (contractIdx && !contractIdx.sparse) {
+      await prisma.$runCommandRaw({ dropIndexes: "conversations", index: "conversations_contractId_key" });
+      await prisma.$runCommandRaw({
+        createIndexes: "conversations",
+        indexes: [{ key: { contractId: 1 }, name: "conversations_contractId_key", unique: true, sparse: true }],
+      });
+    }
+  } catch {
+    // Non-fatal if index inspection fails or permissions differ
+  }
+}
+
+/**
  * Universal Action to initiate or retrieve a direct conversation between Client and Freelancer.
  * Reuses existing conversation thread if one already exists between these two users.
  * If no thread exists, associates with a relevant client job or creates a clean consultation job container.
@@ -466,9 +491,26 @@ export async function getOrCreateDirectConversationAction(
     };
   }
 
+  await ensureSparseContractIndex();
+
   try {
     let actualClientId: string;
     let actualFreelancerId: string;
+    let targetJobId: string | undefined = undefined;
+
+    // 1. If preferredJobId is provided, resolve the job first to guarantee accurate client ownership
+    if (preferredJobId && OBJECT_ID_REGEX.test(preferredJobId)) {
+      const candidateJob = await prisma.job.findUnique({
+        where: { id: preferredJobId },
+        select: { id: true, clientId: true, status: true },
+      });
+      if (candidateJob) {
+        targetJobId = candidateJob.id;
+        if (user.role === "FREELANCER" && candidateJob.clientId) {
+          actualClientId = candidateJob.clientId;
+        }
+      }
+    }
 
     if (user.role === "CLIENT") {
       actualClientId = user.id;
@@ -485,7 +527,9 @@ export async function getOrCreateDirectConversationAction(
         };
       }
     } else {
-      actualClientId = counterpartyId;
+      if (!actualClientId!) {
+        actualClientId = counterpartyId;
+      }
       actualFreelancerId = user.id;
 
       const client = await prisma.user.findUnique({
@@ -504,16 +548,19 @@ export async function getOrCreateDirectConversationAction(
         prisma.proposal.findFirst({
           where: {
             freelancerId: user.id,
-            job: { clientId: actualClientId },
+            OR: [
+              { job: { clientId: actualClientId } },
+              ...(targetJobId ? [{ jobId: targetJobId }] : []),
+            ],
           },
-          select: { id: true },
+          select: { id: true, jobId: true, status: true },
         }),
         prisma.contract.findFirst({
           where: {
             freelancerId: user.id,
             clientId: actualClientId,
           },
-          select: { id: true },
+          select: { id: true, jobId: true },
         }),
       ]);
 
@@ -523,17 +570,38 @@ export async function getOrCreateDirectConversationAction(
           error: "Freelancers can only message clients after submitting a proposal or having an active contract for their jobs.",
         };
       }
+
+      // If targetJobId wasn't set, use the job ID from their proposal or contract
+      if (!targetJobId) {
+        targetJobId = proposalRelationship?.jobId || contractRelationship?.jobId || undefined;
+      }
     }
 
-    // 1. Check for ANY existing conversation between this client and freelancer
-    const existingConversation = await prisma.conversation.findFirst({
-      where: {
-        clientId: actualClientId,
-        freelancerId: actualFreelancerId,
-      },
-      orderBy: { lastMessageAt: "desc" },
-      select: { id: true },
-    });
+    // 2. Check for ANY existing conversation between this client and freelancer (by job or direct pair)
+    let existingConversation = null;
+
+    if (targetJobId) {
+      existingConversation = await prisma.conversation.findUnique({
+        where: {
+          jobId_freelancerId: {
+            jobId: targetJobId,
+            freelancerId: actualFreelancerId,
+          },
+        },
+        select: { id: true },
+      });
+    }
+
+    if (!existingConversation) {
+      existingConversation = await prisma.conversation.findFirst({
+        where: {
+          clientId: actualClientId,
+          freelancerId: actualFreelancerId,
+        },
+        orderBy: { lastMessageAt: "desc" },
+        select: { id: true },
+      });
+    }
 
     if (existingConversation) {
       return {
@@ -543,19 +611,7 @@ export async function getOrCreateDirectConversationAction(
       };
     }
 
-    // 2. Resolve job ID to link the conversation
-    let targetJobId: string | undefined = undefined;
-
-    if (preferredJobId && OBJECT_ID_REGEX.test(preferredJobId)) {
-      const candidate = await prisma.job.findFirst({
-        where: { id: preferredJobId, clientId: actualClientId },
-        select: { id: true },
-      });
-      if (candidate) {
-        targetJobId = candidate.id;
-      }
-    }
-
+    // 3. Resolve targetJobId if still not determined
     if (!targetJobId) {
       const openJob = await prisma.job.findFirst({
         where: { clientId: actualClientId, status: "OPEN" },
@@ -594,7 +650,7 @@ export async function getOrCreateDirectConversationAction(
       targetJobId = consultJob.id;
     }
 
-    // 3. Create pre-hire conversation
+    // 4. Create pre-hire conversation with concurrent fallback resolution
     let createdConv;
     try {
       createdConv = await prisma.conversation.create({
@@ -608,21 +664,37 @@ export async function getOrCreateDirectConversationAction(
         select: { id: true },
       });
     } catch (createErr) {
-      if (
-        (createErr instanceof Prisma.PrismaClientKnownRequestError &&
-          createErr.code === "P2002") ||
-        (createErr as { code?: string })?.code === "P2002"
-      ) {
-        createdConv = await prisma.conversation.findUnique({
-          where: {
-            jobId_freelancerId: {
-              jobId: targetJobId,
+      // Check if duplicate was created concurrently
+      const existingByJob = targetJobId
+        ? await prisma.conversation.findUnique({
+            where: {
+              jobId_freelancerId: {
+                jobId: targetJobId,
+                freelancerId: actualFreelancerId,
+              },
+            },
+            select: { id: true },
+          })
+        : null;
+
+      const existingByClient = existingByJob
+        ? null
+        : await prisma.conversation.findFirst({
+            where: {
+              clientId: actualClientId,
               freelancerId: actualFreelancerId,
             },
-          },
-          select: { id: true },
-        });
-      } else {
+            orderBy: { lastMessageAt: "desc" },
+            select: { id: true },
+          });
+
+      createdConv = existingByJob || existingByClient || undefined;
+
+      if (!createdConv) {
+        console.error(
+          "[WorkPulse Direct Messaging Creation Error]:",
+          createErr instanceof Error ? createErr.message : createErr
+        );
         throw createErr;
       }
     }

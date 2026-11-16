@@ -219,7 +219,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
           // Invalidate JWT session if user was deleted or sessionVersion was incremented (e.g., password reset/change)
           if (!dbUser || (dbUser.sessionVersion ?? 1) !== (token.sessionVersion ?? 1)) {
-            return {} as unknown as typeof token;
+            token.id = "";
+            token.role = undefined;
+            return token;
           }
 
           token.role = dbUser.role;
@@ -239,7 +241,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async session({ session, token }) {
       if (!token || !token.id) {
-        return null as unknown as typeof session;
+        return {
+          expires: session.expires,
+        } as unknown as typeof session;
       }
       if (session.user) {
         session.user.id = token.id as string;

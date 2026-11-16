@@ -125,126 +125,76 @@ export async function getJobFilterOptions(): Promise<JobFilterFacets> {
 
   try {
     const now = new Date();
-    // 2. Execute bounded MongoDB aggregation pipeline via $facet
-    const rawResult = (await prisma.job.aggregateRaw({
-      pipeline: [
-        {
-          $match: {
-            status: "OPEN",
-            $or: [
-              { expiresAt: null },
-              { expiresAt: { $exists: false } },
-              { expiresAt: { $gt: { $date: now.toISOString() } } },
-            ],
-          },
-        },
-        {
-          $facet: {
-            categories: [
-              { $match: { category: { $ne: null, $exists: true } } },
-              {
-                $group: {
-                  _id: "$category",
-                  count: { $sum: 1 },
-                  skillsArray: { $push: "$skills" },
-                },
-              },
-              { $sort: { count: -1 } },
-            ],
-            skills: [
-              { $match: { skills: { $exists: true, $ne: null } } },
-              { $unwind: "$skills" },
-              { $group: { _id: "$skills", count: { $sum: 1 } } },
-              { $sort: { count: -1 } },
-              { $limit: 20 },
-            ],
-            budgetBounds: [
-              {
-                $project: {
-                  effectiveBudget: {
-                    $cond: [
-                      { $eq: ["$type", "FIXED"] },
-                      "$budget",
-                      "$hourlyMax",
-                    ],
-                  },
-                },
-              },
-              {
-                $match: {
-                  effectiveBudget: { $ne: null, $gt: 0 },
-                },
-              },
-              {
-                $group: {
-                  _id: null,
-                  min: { $min: "$effectiveBudget" },
-                  max: { $max: "$effectiveBudget" },
-                },
-              },
-            ],
-          },
-        },
-      ],
-    })) as unknown as Array<{
-      categories?: Array<{ _id: string; count: number; skillsArray?: unknown[] }>;
-      skills?: Array<{ _id: string; count: number }>;
-      budgetBounds?: Array<{ _id: null; min?: number; max?: number }>;
-    }>;
+    // 2. Fetch active jobs safely via standard Prisma queries without brittle raw MongoDB pipeline
+    const openJobs = await prisma.job.findMany({
+      where: {
+        status: "OPEN",
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: now } },
+        ],
+      },
+      select: {
+        category: true,
+        skills: true,
+        type: true,
+        budget: true,
+        hourlyMax: true,
+      },
+    });
 
-    const facetData = rawResult?.[0];
-    const categories = (facetData?.categories || [])
-      .filter((c) => Boolean(c._id))
-      .map((c) => {
-        const flattened: string[] = [];
-        if (Array.isArray(c.skillsArray)) {
-          for (const item of c.skillsArray) {
-            if (Array.isArray(item)) {
-              for (const s of item) {
-                if (typeof s === "string" && s.trim().length > 0) {
-                  flattened.push(s.trim());
-                }
-              }
-            } else if (typeof item === "string" && item.trim().length > 0) {
-              flattened.push(item.trim());
+    const categoryMap: Record<string, { count: number; skills: Record<string, number> }> = {};
+    const skillCounts: Record<string, number> = {};
+    let minBudget = Infinity;
+    let maxBudget = 0;
+
+    for (const job of openJobs) {
+      if (job.category && typeof job.category === "string" && job.category.trim()) {
+        const cat = job.category.trim();
+        if (!categoryMap[cat]) {
+          categoryMap[cat] = { count: 0, skills: {} };
+        }
+        categoryMap[cat].count += 1;
+
+        if (Array.isArray(job.skills)) {
+          for (const s of job.skills) {
+            if (typeof s === "string" && s.trim()) {
+              const cleanSkill = s.trim();
+              categoryMap[cat].skills[cleanSkill] = (categoryMap[cat].skills[cleanSkill] || 0) + 1;
+              skillCounts[cleanSkill] = (skillCounts[cleanSkill] || 0) + 1;
             }
           }
         }
+      }
 
-        // Count frequency of skills within this category to rank top relevant skills
-        const skillCounts: Record<string, number> = {};
-        for (const s of flattened) {
-          skillCounts[s] = (skillCounts[s] || 0) + 1;
-        }
+      const effectiveBudget = job.type === "FIXED" ? job.budget : job.hourlyMax;
+      if (effectiveBudget != null && effectiveBudget > 0) {
+        if (effectiveBudget < minBudget) minBudget = effectiveBudget;
+        if (effectiveBudget > maxBudget) maxBudget = effectiveBudget;
+      }
+    }
 
-        const sortedSkills = Object.entries(skillCounts)
+    const categories = Object.entries(categoryMap)
+      .map(([cat, info]) => ({
+        category: cat,
+        count: info.count,
+        skills: Object.entries(info.skills)
           .sort((a, b) => b[1] - a[1])
-          .map(([name]) => name);
+          .map(([name]) => name),
+      }))
+      .sort((a, b) => b.count - a.count);
 
-        return {
-          category: String(c._id),
-          count: Number(c.count) || 0,
-          skills: sortedSkills,
-        };
-      });
-
-    const skills = (facetData?.skills || [])
-      .filter((s) => Boolean(s._id))
-      .map((s) => ({ skill: String(s._id), count: Number(s.count) || 0 }));
-
-    const bounds = facetData?.budgetBounds?.[0];
-    const rawMin = bounds?.min;
-    const rawMax = bounds?.max;
+    const skills = Object.entries(skillCounts)
+      .map(([skill, count]) => ({ skill, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20);
 
     const facets: JobFilterFacets = {
       categories,
       skills,
       budgetBounds: {
-        min: rawMin != null && !isNaN(rawMin) ? Math.floor(rawMin) : 0,
-        max:
-          rawMax != null && !isNaN(rawMax) && rawMax > 0
-            ? Math.ceil(rawMax)
-            : 10000,
+        min: minBudget !== Infinity ? Math.floor(minBudget) : 0,
+        max: maxBudget > 0 ? Math.ceil(maxBudget) : 10000,
       },
     };
 

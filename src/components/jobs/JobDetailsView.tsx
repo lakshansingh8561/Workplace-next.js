@@ -48,11 +48,14 @@ export function JobDetailsView({
 
   const handleMessageClient = async () => {
     const targetClientId = job?.clientId || job?.client?.id;
-    if (!targetClientId) return;
+    if (!targetClientId && !job?.id) {
+      setChatError("Client information could not be resolved for this contract.");
+      return;
+    }
     setIsConnectingChat(true);
     setChatError(null);
     try {
-      const res = await getOrCreateDirectConversationAction(targetClientId, job?.id);
+      const res = await getOrCreateDirectConversationAction(targetClientId || "", job?.id);
       if (res.success && res.conversationId) {
         router.push(`/messages?conversationId=${res.conversationId}`);
       } else {
@@ -245,6 +248,23 @@ export function JobDetailsView({
               ✕
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Messaging Error Banner */}
+      {chatError && (
+        <div className="mb-6 rounded-2xl bg-rose-50 p-4 border border-rose-200 dark:bg-rose-950/40 dark:border-rose-800 text-sm font-medium text-rose-800 dark:text-rose-300 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{chatError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setChatError(null)}
+            className="text-rose-700 hover:text-rose-900 dark:text-rose-400 text-xs font-bold"
+          >
+            ✕
+          </button>
         </div>
       )}
 

@@ -428,8 +428,8 @@ export function ContractDetailsView({
         />
       )}
 
-      {/* Milestones Section (For Fixed Contracts or Supplemental Hourly Checkpoints) */}
-      {(!isHourly || contract.milestones.length > 0 || (isClient && contract.status === "ACTIVE")) && (
+      {/* Milestones Section (Exclusively For Fixed-Price Contracts or Explicit Milestones) */}
+      {(!isHourly || contract.milestones.length > 0) && (
       <div className="mt-8 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -441,7 +441,7 @@ export function ContractDetailsView({
             </p>
           </div>
 
-          {isClient && contract.status === "ACTIVE" && (
+          {!isHourly && isClient && contract.status === "ACTIVE" && (
             <button
               type="button"
               onClick={() => setIsAddingMilestone(!isAddingMilestone)}

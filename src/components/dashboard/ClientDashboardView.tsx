@@ -130,18 +130,17 @@ export function ClientDashboardView({
 }: ClientDashboardViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [jobs, setJobs] = useState<ClientDashboardJob[]>(initialJobs);
+  const [optimisticJobStatus, setOptimisticJobStatus] = useState<Record<string, JobStatus>>({});
+  const jobs = initialJobs.map((j) => ({
+    ...j,
+    status: optimisticJobStatus[j.id] || j.status,
+  }));
   const [searchTerm, setSearchTerm] = useState(searchQuery);
   const [activeTab, setActiveTab] = useState<"JOBS" | "PROPOSALS" | "CONTRACTS" | "OFFERS" | "TALENT">("JOBS");
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [hireFreelancer, setHireFreelancer] = useState<ClientDashboardFreelancer | null>(null);
   const [isPending, startTransition] = useTransition();
-
-  // Sync internal state immediately whenever server data updates
-  useEffect(() => {
-    setJobs(initialJobs);
-  }, [initialJobs]);
 
   useEffect(() => {
     setSearchTerm(searchQuery);
@@ -181,13 +180,17 @@ export function ClientDashboardView({
     setActiveJobId(jobId);
 
     startTransition(async () => {
+      setOptimisticJobStatus((prev) => ({ ...prev, [jobId]: newStatus }));
       const res = await updateJobStatusAction({ jobId, status: newStatus });
-      if (res.success) {
-        setJobs((prev) =>
-          prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j))
-        );
-      } else {
+      if (!res.success) {
+        setOptimisticJobStatus((prev) => {
+          const next = { ...prev };
+          delete next[jobId];
+          return next;
+        });
         setActionError(res.error || "Failed to update job status.");
+      } else {
+        router.refresh();
       }
       setActiveJobId(null);
     });
@@ -636,16 +639,16 @@ export function ClientDashboardView({
                   </div>
 
                   <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800 text-xs">
-                    <span className="text-zinc-500">
+                    <span className="text-zinc-500 font-medium">
                       {c.type === "HOURLY"
-                        ? `$${c.hourlyRate ?? 0}/hr`
+                        ? `$${c.hourlyRate ?? 0}/hr (Hourly)`
                         : `$${c.totalAmount?.toLocaleString() ?? 0} Fixed`}
                     </span>
                     <Link
                       href={`/contracts/${c.id}`}
                       className="font-bold text-emerald-600 hover:underline dark:text-emerald-400"
                     >
-                      Manage Contract →
+                      {c.type === "HOURLY" ? "Work Diary & Hours →" : "Manage Contract →"}
                     </Link>
                   </div>
                 </div>

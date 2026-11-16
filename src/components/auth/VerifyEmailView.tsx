@@ -319,8 +319,8 @@ export function VerifyEmailView() {
             </h1>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-sm mx-auto">
               {userRole === "CLIENT"
-                ? "Your email address has been successfully verified. You can now sign in to your WorkPulse account and discover talented freelancers for your projects."
-                : "Your email address has been successfully verified. You can now sign in to your WorkPulse account and explore freelance opportunities."}
+                ? "Your client account has been verified. You can now sign in to your WorkPulse account to post jobs, discover talent, and manage your contracts."
+                : "Your email address has been verified. You can now sign in to your WorkPulse account to explore freelance opportunities and submit proposals."}
             </p>
             <div className="pt-3">
               <button
@@ -359,14 +359,14 @@ export function VerifyEmailView() {
             </h1>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-sm mx-auto">
               {userRole === "CLIENT"
-                ? "Your email address is already verified. You can now sign in to your WorkPulse account and discover talented freelancers for your projects."
-                : "Your email address is already verified. You can now sign in to your WorkPulse account and explore freelance opportunities."}
+                ? "Your client account is already verified. You can now sign in to your WorkPulse account to post jobs, discover talent, and manage contracts."
+                : "Your email address is already verified. You can now sign in to your WorkPulse account to explore freelance opportunities and submit proposals."}
             </p>
             <div className="pt-3">
               <button
                 type="button"
                 onClick={() => {
-                  router.push("/login");
+                  router.push("/login?verified=true");
                 }}
                 className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
               >

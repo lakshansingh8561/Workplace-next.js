@@ -212,13 +212,25 @@ export function ContractsListView({
                       {contract.title}
                     </Link>
 
-                    {/* Milestones Summary */}
-                    <div className="flex items-center gap-2 pt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      <span>Milestones:</span>
-                      <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                        {contract.approvedMilestonesCount} of {contract.milestonesCount} approved
-                      </span>
-                    </div>
+                    {/* Progress / Tracking Summary */}
+                    {isHourly ? (
+                      <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60">
+                          ⏱️ Hourly Billing & Time Tracker
+                        </span>
+                        <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                        <span className="text-zinc-500 dark:text-zinc-400">
+                          Automatic screenshots & weekly timesheets
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 pt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        <span>Milestones:</span>
+                        <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                          {contract.approvedMilestonesCount} of {contract.milestonesCount} approved
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Status & View CTA */}
@@ -241,7 +253,11 @@ export function ContractsListView({
                       href={`/contracts/${contract.id}`}
                       className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition active:scale-95"
                     >
-                      View Contract →
+                      {isHourly
+                        ? userRole === "FREELANCER"
+                          ? "Track Time / Work Diary →"
+                          : "View Work Diary & Billing →"
+                        : "View Contract →"}
                     </Link>
                   </div>
                 </div>
