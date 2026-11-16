@@ -1,10 +1,18 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { POPULAR_CATEGORIES } from "@/data";
+import { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
+import { Category } from "@/types";
+import { matchesCategoryGroup } from "@/lib/jobs";
 import { CategoryCard } from "./CategoryCard";
 
-export function CategorySection() {
+interface CategorySectionProps {
+  initialCategories?: Category[];
+}
+
+export function CategorySection({ initialCategories }: CategorySectionProps) {
+  const [categories, setCategories] = useState<Category[]>(initialCategories || []);
+  const [isLoading, setIsLoading] = useState(!initialCategories);
   const [selectedFilter, setSelectedFilter] = useState<string>("all");
   const [filterQuery, setFilterQuery] = useState<string>("");
 
@@ -15,15 +23,71 @@ export function CategorySection() {
     { id: "business", label: "Business & Growth" },
   ];
 
+  // Client-side fallback fetch only if initialCategories was not provided
+  useEffect(() => {
+    if (initialCategories) {
+      setCategories(initialCategories);
+      setIsLoading(false);
+      return;
+    }
+
+    let ignore = false;
+    async function load() {
+      try {
+        setIsLoading(true);
+        const res = await fetch("/api/jobs/filters");
+        if (!res.ok) throw new Error("Failed to load category filters");
+        const json = await res.json();
+        if (!ignore && json.facets?.categories) {
+          const { CATEGORY_METADATA } = await import("@/lib/jobs");
+          const derived: Category[] = (
+            json.facets.categories as Array<{
+              category: string;
+              count: number;
+              skills?: string[];
+            }>
+          )
+            .filter((c) => c.count > 0 && c.category)
+            .map((c) => {
+              const normalized = c.category.toLowerCase().trim();
+              const meta = CATEGORY_METADATA[normalized] || {
+                icon: "layers",
+                description: `Explore specialized skills and contracts in ${c.category}.`,
+              };
+              const slug = c.category
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-|-$/g, "");
+              return {
+                id: slug,
+                name: c.category,
+                slug,
+                icon: meta.icon,
+                jobCount: c.count,
+                description: meta.description,
+                skills: c.skills || [],
+              };
+            });
+          setCategories(derived);
+        }
+      } catch (err) {
+        console.error("[CategorySection Error]:", err);
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      ignore = true;
+    };
+  }, [initialCategories]);
+
   const filteredCategories = useMemo(() => {
-    return POPULAR_CATEGORIES.filter((category) => {
-      // 1. Tab filter
-      if (selectedFilter === "tech") {
-        if (!["dev-it", "ai-services", "engineering-arch"].includes(category.id)) return false;
-      } else if (selectedFilter === "creative") {
-        if (!["design", "writing"].includes(category.id)) return false;
-      } else if (selectedFilter === "business") {
-        if (!["sales-mkt", "admin-support", "finance-accounting"].includes(category.id)) return false;
+    return categories.filter((category) => {
+      // 1. Group Tab filter (using centralized mapping)
+      if (!matchesCategoryGroup(category.name, selectedFilter)) {
+        return false;
       }
 
       // 2. Query filter
@@ -37,7 +101,7 @@ export function CategorySection() {
 
       return true;
     });
-  }, [selectedFilter, filterQuery]);
+  }, [categories, selectedFilter, filterQuery]);
 
   return (
     <section id="categories" className="w-full py-20 bg-zinc-50/50 dark:bg-zinc-950/40">
@@ -78,17 +142,41 @@ export function CategorySection() {
           </div>
         </div>
 
-        {/* Dynamic Category Card Grid */}
-        {filteredCategories.length > 0 ? (
+        {/* Dynamic Category Card Grid / Loading / Empty States */}
+        {isLoading ? (
+          <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {[1, 2, 3, 4].map((n) => (
+              <div
+                key={n}
+                className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 animate-pulse h-48"
+              />
+            ))}
+          </div>
+        ) : filteredCategories.length > 0 ? (
           <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {filteredCategories.map((category) => (
               <CategoryCard key={category.id} category={category} />
             ))}
           </div>
+        ) : categories.length === 0 ? (
+          <div className="mt-12 rounded-2xl border border-dashed border-zinc-300 p-12 text-center dark:border-zinc-800">
+            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+              No active job categories found
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Check back soon or post a new job to open a category.
+            </p>
+            <Link
+              href="/jobs/new"
+              className="mt-4 inline-flex items-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition"
+            >
+              Post a Job →
+            </Link>
+          </div>
         ) : (
           <div className="mt-12 rounded-2xl border border-dashed border-zinc-300 p-12 text-center dark:border-zinc-800">
             <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-              No categories found for &quot;{filterQuery}&quot;
+              No categories found for &quot;{filterQuery || selectedFilter}&quot;
             </p>
             <p className="mt-1 text-xs text-zinc-500">
               Try adjusting your filter tabs or search terms.

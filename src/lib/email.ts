@@ -424,7 +424,10 @@ export async function sendEmailVerificationOtp({
   const greeting = recipientName ? `Hello ${recipientName},` : "Hello,";
 
   if (process.env.NODE_ENV !== "production") {
-    console.log(`[WorkPulse Email OTP (DEV ONLY)] 📩 6-digit verification code for ${to}: ${otp}`);
+    console.log("\n" + "=".repeat(60));
+    console.log(`[WorkPulse Email OTP] 📩 Verification Code for ${to}:`);
+    console.log(`                 👉  ${otp}  👈`);
+    console.log("=".repeat(60) + "\n");
   }
 
   const subject = `${otp} is your WorkPulse verification code`;

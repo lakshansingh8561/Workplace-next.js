@@ -257,7 +257,11 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
     });
     if (dbUser) {
       userRole = dbUser.role as Role;
-      if (!redirectTo || redirectTo === "/jobs" || redirectTo === "/dashboard") {
+      if (
+        !redirectTo ||
+        (dbUser.role === "CLIENT" && (redirectTo === "/jobs" || redirectTo === "/dashboard" || redirectTo.startsWith("/dashboard/freelancer"))) ||
+        (dbUser.role === "FREELANCER" && (redirectTo === "/dashboard" || redirectTo.startsWith("/dashboard/client")))
+      ) {
         if (!dbUser.roleSelected) {
           destination = "/onboarding/role";
         } else if (dbUser.role === "CLIENT") {

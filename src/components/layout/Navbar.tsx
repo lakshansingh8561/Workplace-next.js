@@ -546,10 +546,10 @@ export function Navbar({ user }: NavbarProps) {
 
               {isUserMenuOpen && (
                 <div
-                  className="absolute right-0 mt-2 w-52 rounded-2xl border border-zinc-200 bg-white p-2 shadow-xl dark:border-zinc-800 dark:bg-zinc-950 z-50"
+                  className="absolute right-0 mt-2 w-56 rounded-2xl border border-zinc-200 bg-white p-2 shadow-xl dark:border-zinc-800 dark:bg-zinc-950 z-50 flex flex-col max-h-[calc(100vh-5rem)] overflow-hidden"
                   role="menu"
                 >
-                  <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800">
+                  <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
                     <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">
                       {user.name || "WorkPulse User"}
                     </p>
@@ -559,7 +559,7 @@ export function Navbar({ user }: NavbarProps) {
                     </span>
                   </div>
 
-                  <div className="py-1 border-b border-zinc-100 dark:border-zinc-800">
+                  <div className="py-1 border-b border-zinc-100 dark:border-zinc-800 overflow-y-auto overscroll-contain flex-1 max-h-[60vh] space-y-0.5">
                     {user.role === "CLIENT" ? (
                       <>
                         <Link
@@ -709,47 +709,11 @@ export function Navbar({ user }: NavbarProps) {
                           <span>🌐</span>
                           <span>Public Profile</span>
                         </Link>
-                        <Link
-                          href="/dashboard/freelancer/invitations"
-                          onClick={closeMenu}
-                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-                          role="menuitem"
-                        >
-                          <span>🤝</span>
-                          <span>Interview Invitations</span>
-                        </Link>
-                        <Link
-                          href="/contracts"
-                          onClick={closeMenu}
-                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-                          role="menuitem"
-                        >
-                          <span>📄</span>
-                          <span>Contracts & Milestones</span>
-                        </Link>
-                        <Link
-                          href="/messages"
-                          onClick={closeMenu}
-                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-                          role="menuitem"
-                        >
-                          <span>💬</span>
-                          <span>Messages</span>
-                        </Link>
-                        <Link
-                          href="/jobs"
-                          onClick={closeMenu}
-                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-                          role="menuitem"
-                        >
-                          <span>🔍</span>
-                          <span>Browse Jobs</span>
-                        </Link>
                       </>
                     )}
                   </div>
 
-                  <div className="pt-1">
+                  <div className="pt-1 shrink-0">
                     <button
                       type="button"
                       onClick={handleSignOut}

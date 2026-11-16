@@ -43,8 +43,8 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
       throw error;
     }
 
-    console.error(
-      "[WorkPulse Session Error]:",
+    console.warn(
+      "[WorkPulse Session Warning]:",
       error instanceof Error ? error.message : "Error verifying session"
     );
     return null;

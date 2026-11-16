@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useTransition } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import {
   Job,
   JobPagination as PaginationType,
@@ -15,11 +16,32 @@ import { JobSkeleton } from "./JobSkeleton";
 import { getSavedJobIdsAction } from "@/lib/actions/savedJob";
 import { SaveSearchModal } from "./SaveSearchModal";
 
-export function JobsExplorer() {
+export interface JobsExplorerProps {
+  userRole?: string | null;
+}
+
+export function JobsExplorer({ userRole: initialUserRole }: JobsExplorerProps = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
+
+  const [activeRole, setActiveRole] = useState<string | null>(initialUserRole ?? null);
+
+  useEffect(() => {
+    if (initialUserRole !== undefined) {
+      setActiveRole(initialUserRole);
+      return;
+    }
+    fetch("/api/auth/session")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((session) => {
+        if (session?.user?.role) {
+          setActiveRole(session.user.role);
+        }
+      })
+      .catch(() => {});
+  }, [initialUserRole]);
 
   // URL query parameters synchronization
   const searchParam = searchParams.get("search") || "";
@@ -242,12 +264,51 @@ export function JobsExplorer() {
     <div className="mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Header & Search */}
       <div className="mb-6">
-        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-950 dark:text-white">
-          Find Freelance Work
-        </h1>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          Discover verified contracts across software engineering, AI, design, marketing, and finance.
-        </p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-950 dark:text-white">
+              {categoryParam && categoryParam !== "all"
+                ? `${categoryParam} Jobs`
+                : "Find Freelance Work"}
+            </h1>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+              {categoryParam && categoryParam !== "all"
+                ? `Explore active, verified marketplace contracts in ${categoryParam}.`
+                : "Discover verified contracts across software engineering, AI, design, marketing, and finance."}
+            </p>
+          </div>
+
+          {activeRole === "CLIENT" && (
+            <Link
+              href="/jobs/new"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-500 self-start sm:self-auto shrink-0"
+            >
+              <span>+ Post a Job</span>
+            </Link>
+          )}
+        </div>
+
+        {/* Client Read-Only Notice Banner */}
+        {activeRole === "CLIENT" && (
+          <div className="mt-4 rounded-2xl bg-zinc-50 border border-zinc-200/90 p-4 dark:bg-zinc-900/60 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5 text-zinc-700 dark:text-zinc-300">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold">
+                ℹ
+              </span>
+              <span>
+                <strong>Client Browsing Mode:</strong> You are browsing public marketplace jobs in read-only mode.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/dashboard/client"
+                className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 transition"
+              >
+                Client Dashboard →
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* Search Bar Form */}
         <form onSubmit={handleSearchSubmit} className="mt-6 flex flex-col sm:flex-row gap-2 max-w-3xl">
@@ -441,11 +502,27 @@ export function JobsExplorer() {
               {isLoading ? (
                 "Searching verified contracts..."
               ) : pagination.total === 0 ? (
-                "0 jobs found"
+                categoryParam && categoryParam !== "all" ? (
+                  `0 jobs found in ${categoryParam}`
+                ) : (
+                  "0 jobs found"
+                )
               ) : (
                 <>
-                  Showing <span className="font-semibold text-zinc-800 dark:text-zinc-200">{startItem}–{endItem}</span> of{" "}
-                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">{pagination.total}</span> jobs
+                  Showing{" "}
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                    {startItem}–{endItem}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                    {pagination.total}
+                  </span>{" "}
+                  {pagination.total === 1 ? "job" : "jobs"}
+                  {categoryParam && categoryParam !== "all" && (
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      {" "}in {categoryParam}
+                    </span>
+                  )}
                 </>
               )}
             </span>
@@ -510,6 +587,7 @@ export function JobsExplorer() {
                   key={job.id}
                   job={job}
                   isSaved={savedJobIds.has(job.id)}
+                  userRole={activeRole}
                   onToggleSave={(isSaved) => handleToggleSaved(job.id, isSaved)}
                 />
               ))}

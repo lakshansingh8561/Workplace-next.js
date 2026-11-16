@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { POPULAR_CATEGORIES } from "@/data";
 import { JobFilterFacets } from "@/types";
 
 interface JobFiltersProps {
@@ -93,24 +92,27 @@ export function JobFilters({
     onBudgetChange(min, max);
   };
 
-  // Derive categories: merge real DB categories with defaults
-  const categoriesList =
-    facets?.categories && facets.categories.length > 0
-      ? facets.categories
-      : POPULAR_CATEGORIES.map((c) => ({ category: c.name, count: c.jobCount }));
+  // Derive categories from real database facets (no hardcoded fallback)
+  const categoriesList = [...(facets?.categories || [])];
+  if (
+    selectedCategory &&
+    selectedCategory !== "all" &&
+    !categoriesList.some(
+      (c) => c.category.toLowerCase() === selectedCategory.toLowerCase()
+    )
+  ) {
+    categoriesList.unshift({ category: selectedCategory, count: 0 });
+  }
 
-  // Derive popular skills: from real data or fallback
-  const skillsList =
-    facets?.skills && facets.skills.length > 0
-      ? facets.skills
-      : [
-          { skill: "React", count: 2 },
-          { skill: "Next.js", count: 2 },
-          { skill: "TypeScript", count: 2 },
-          { skill: "Python", count: 1 },
-          { skill: "Figma", count: 1 },
-          { skill: "AWS", count: 1 },
-        ];
+  const matchedCategory = categoriesList.find(
+    (c) => c.category.toLowerCase() === selectedCategory.toLowerCase()
+  );
+  const activeCategoryValue = matchedCategory
+    ? matchedCategory.category
+    : selectedCategory;
+
+  // Derive popular skills from real database facets (no hardcoded fallback)
+  const skillsList = facets?.skills || [];
 
   return (
     <aside className="rounded-2xl border border-zinc-200/90 bg-white p-5 sm:p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90 space-y-6 max-h-[calc(100vh-5rem)] overflow-y-auto overscroll-contain">
@@ -166,7 +168,7 @@ export function JobFilters({
         </label>
         <select
           id="category-select"
-          value={selectedCategory}
+          value={activeCategoryValue}
           onChange={(e) => onCategoryChange(e.target.value)}
           className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-medium text-zinc-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
         >

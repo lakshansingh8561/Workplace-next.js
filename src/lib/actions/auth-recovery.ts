@@ -28,6 +28,7 @@ export type AuthRecoveryResult = {
   fieldErrors?: Record<string, string>;
   expired?: boolean;
   alreadyVerified?: boolean;
+  role?: "CLIENT" | "FREELANCER";
 };
 
 /**
@@ -323,7 +324,7 @@ export async function verifyEmailAction(
       // 3. Find matching user
       const user = await tx.user.findUnique({
         where: { email: record.email },
-        select: { id: true, emailVerified: true },
+        select: { id: true, emailVerified: true, role: true },
       });
 
       if (!user) {
@@ -342,6 +343,7 @@ export async function verifyEmailAction(
         return {
           valid: true,
           alreadyVerified: true,
+          role: user.role,
         };
       }
 
@@ -356,7 +358,7 @@ export async function verifyEmailAction(
         where: { email: record.email },
       });
 
-      return { valid: true };
+      return { valid: true, role: user.role };
     });
 
     if (!result.valid) {
@@ -372,12 +374,14 @@ export async function verifyEmailAction(
         success: true,
         alreadyVerified: true,
         message: "Your email address is already verified.",
+        role: result.role as "CLIENT" | "FREELANCER",
       };
     }
 
     return {
       success: true,
       message: "Your email address has been verified successfully. Welcome to WorkPulse!",
+      role: result.role as "CLIENT" | "FREELANCER",
     };
   } catch (error) {
     console.error(
@@ -514,6 +518,18 @@ export async function sendEmailVerificationOtpAction(
   const email = parsed.data.email.toLowerCase().trim();
   const clientIp = await getClientIp();
 
+  // Security guard: If a user session is active, verify they can only request OTP for their own email
+  const currentUser = await getCurrentUser();
+  if (
+    currentUser?.email &&
+    currentUser.email.toLowerCase() !== email
+  ) {
+    return {
+      success: false,
+      error: "You cannot request a verification code for another user's email address.",
+    };
+  }
+
   // Rate limit: 5 requests per 15 minutes per IP & email
   const rateLimit = await checkRateLimit(`otp-send:${clientIp}:${email}`, {
     limit: 5,
@@ -631,6 +647,18 @@ export async function verifyEmailOtpAction(
   const otp = parsed.data.otp.trim();
   const clientIp = await getClientIp();
 
+  // Security guard: If a user session is active, ensure they cannot verify a different user's account
+  const currentUser = await getCurrentUser();
+  if (
+    currentUser?.email &&
+    currentUser.email.toLowerCase() !== email
+  ) {
+    return {
+      success: false,
+      error: "You cannot verify an email address belonging to another user.",
+    };
+  }
+
   // Rate limit OTP verification attempts to prevent brute force (10 attempts per 10 minutes)
   const attemptLimit = await checkRateLimit(`otp-verify:${clientIp}:${email}`, {
     limit: 10,
@@ -682,7 +710,7 @@ export async function verifyEmailOtpAction(
       // 3. Find matching user
       const user = await tx.user.findUnique({
         where: { email },
-        select: { id: true, emailVerified: true },
+        select: { id: true, emailVerified: true, role: true },
       });
 
       if (!user) {
@@ -700,6 +728,7 @@ export async function verifyEmailOtpAction(
         return {
           valid: true,
           alreadyVerified: true,
+          role: user.role,
         };
       }
 
@@ -716,7 +745,7 @@ export async function verifyEmailOtpAction(
         where: { email },
       });
 
-      return { valid: true };
+      return { valid: true, role: user.role };
     });
 
     if (!result.valid) {
@@ -732,12 +761,14 @@ export async function verifyEmailOtpAction(
         success: true,
         alreadyVerified: true,
         message: "Your email address is already verified.",
+        role: result.role as "CLIENT" | "FREELANCER",
       };
     }
 
     return {
       success: true,
       message: "Your email address has been verified successfully. Welcome to WorkPulse!",
+      role: result.role as "CLIENT" | "FREELANCER",
     };
   } catch (error) {
     console.error(
@@ -923,3 +954,47 @@ export async function cleanupExpiredTokensAction(): Promise<{
     };
   }
 }
+
+/**
+ * Server Action to look up a user's verification state and role by email.
+ * Allows the verification view to adapt content (CLIENT vs FREELANCER) dynamically.
+ */
+export async function getUserVerificationStateAction(
+  emailInput: string
+): Promise<{
+  exists: boolean;
+  verified: boolean;
+  role?: "CLIENT" | "FREELANCER";
+}> {
+  try {
+    const email = (emailInput || "").toLowerCase().trim();
+    if (!email) {
+      return { exists: false, verified: false };
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        role: true,
+        emailVerified: true,
+      },
+    });
+
+    if (!user) {
+      return { exists: false, verified: false };
+    }
+
+    return {
+      exists: true,
+      verified: Boolean(user.emailVerified),
+      role: (user.role as "CLIENT" | "FREELANCER") || "FREELANCER",
+    };
+  } catch (error) {
+    console.error(
+      "[WorkPulse Get Verification State Error]:",
+      error instanceof Error ? error.message : "Database error"
+    );
+    return { exists: false, verified: false };
+  }
+}
+

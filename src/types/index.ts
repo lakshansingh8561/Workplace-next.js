@@ -78,7 +78,7 @@ export interface JobPagination {
 }
 
 export interface JobFilterFacets {
-  categories: { category: string; count: number }[];
+  categories: { category: string; count: number; skills?: string[] }[];
   skills: { skill: string; count: number }[];
   budgetBounds: { min: number; max: number };
 }

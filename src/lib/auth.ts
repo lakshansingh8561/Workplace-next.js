@@ -28,8 +28,10 @@ const resolvedSecret =
     ? "workpulse-marketplace-local-development-secret-key-32chars"
     : undefined);
 
-const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
-const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || "";
+const googleClientId =
+  process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID || "";
+const googleClientSecret =
+  process.env.GOOGLE_CLIENT_SECRET || process.env.AUTH_GOOGLE_SECRET || "";
 
 const CredentialsSchema = z.object({
   email: z.string().email(),
@@ -68,6 +70,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId: googleClientId,
       clientSecret: googleClientSecret,
+      allowDangerousEmailAccountLinking: true,
     }),
     Credentials({
       name: "credentials",
@@ -203,25 +206,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       // Enforce live database session invalidation & latest state
       if (token.id) {
-        const dbUser = await prisma.user.findUnique({
-          where: { id: token.id as string },
-          select: {
-            role: true,
-            roleSelected: true,
-            sessionVersion: true,
-            emailVerified: true,
-          },
-        });
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: {
+              role: true,
+              roleSelected: true,
+              sessionVersion: true,
+              emailVerified: true,
+            },
+          });
 
-        // Invalidate JWT session if user was deleted or sessionVersion was incremented (e.g., password reset/change)
-        if (!dbUser || (dbUser.sessionVersion ?? 1) !== (token.sessionVersion ?? 1)) {
-          return null as unknown as typeof token;
+          // Invalidate JWT session if user was deleted or sessionVersion was incremented (e.g., password reset/change)
+          if (!dbUser || (dbUser.sessionVersion ?? 1) !== (token.sessionVersion ?? 1)) {
+            return {} as unknown as typeof token;
+          }
+
+          token.role = dbUser.role;
+          token.roleSelected = dbUser.roleSelected;
+          token.sessionVersion = dbUser.sessionVersion ?? 1;
+          token.emailVerified = dbUser.emailVerified;
+        } catch (dbErr) {
+          // If the database is momentarily busy or reconnecting, do not crash the session
+          console.warn(
+            "[WorkPulse Auth JWT Warning] Database temporarily unavailable during session sync:",
+            dbErr instanceof Error ? dbErr.message : "DB error"
+          );
         }
-
-        token.role = dbUser.role;
-        token.roleSelected = dbUser.roleSelected;
-        token.sessionVersion = dbUser.sessionVersion ?? 1;
-        token.emailVerified = dbUser.emailVerified;
       }
 
       return token;

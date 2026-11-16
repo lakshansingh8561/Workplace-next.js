@@ -7,6 +7,7 @@ import { PaymentType, ExperienceLevel, JobStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { matchJobAlertsForPublishedJob } from "@/lib/actions/saved-search";
+import { invalidateJobFilterCache } from "@/lib/jobs";
 
 export type CreateJobResult = {
   success: boolean;
@@ -173,6 +174,7 @@ export async function createJobAction(input: unknown): Promise<CreateJobResult> 
     });
 
     // Invalidate affected cached routes
+    invalidateJobFilterCache();
     revalidatePath("/jobs");
     revalidatePath("/dashboard/client");
     revalidatePath("/");
@@ -277,6 +279,7 @@ export async function updateJobAction(input: unknown): Promise<UpdateJobResult> 
       select: { id: true, status: true },
     });
 
+    invalidateJobFilterCache();
     revalidatePath("/jobs");
     revalidatePath(`/jobs/${data.jobId}`);
     revalidatePath("/dashboard/client");
@@ -441,6 +444,7 @@ export async function updateJobStatusAction(
       },
     });
 
+    invalidateJobFilterCache();
     revalidatePath("/dashboard/client");
     revalidatePath("/jobs");
     revalidatePath(`/jobs/${jobId}`);

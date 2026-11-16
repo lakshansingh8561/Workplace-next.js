@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useId, FormEvent } from "react";
-import { POPULAR_CATEGORIES } from "@/data";
+import { Category } from "@/types";
 
 interface MarketplaceSearchProps {
   onSearch?: (query: string) => void;
+  categories?: Category[];
 }
 
-export function MarketplaceSearch({ onSearch }: MarketplaceSearchProps) {
+export function MarketplaceSearch({ onSearch, categories = [] }: MarketplaceSearchProps) {
   const [query, setQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
@@ -36,7 +37,7 @@ export function MarketplaceSearch({ onSearch }: MarketplaceSearchProps) {
     }
 
     // Local client-side evaluation across categories & skills
-    const matchingCategories = POPULAR_CATEGORIES.filter((cat) => {
+    const matchingCategories = categories.filter((cat) => {
       const nameMatch = cat.name.toLowerCase().includes(trimmed);
       const descMatch = cat.description?.toLowerCase().includes(trimmed);
       const skillMatch = cat.skills?.some((s) => s.toLowerCase().includes(trimmed));

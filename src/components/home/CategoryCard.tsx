@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Category } from "@/types";
 
 interface CategoryCardProps {
@@ -75,12 +76,23 @@ export function CategoryCard({ category }: CategoryCardProps) {
     }
   };
 
+  const encodedCategory = encodeURIComponent(category.name);
+  const displayedSkills = (category.skills || []).slice(0, 3);
+  const remainingSkillsCount = Math.max(0, (category.skills?.length || 0) - 3);
+
   return (
     <div
       id={`category-${category.slug}`}
       className="group relative flex flex-col justify-between rounded-2xl border border-zinc-200/90 bg-white p-6 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-emerald-500/80 hover:shadow-lg hover:shadow-emerald-500/5 dark:border-zinc-800 dark:bg-zinc-900/90"
     >
-      <div>
+      {/* Primary Stretched Link covering the entire card */}
+      <Link
+        href={`/jobs?category=${encodedCategory}`}
+        className="absolute inset-0 z-0 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+        aria-label={`Browse ${category.jobCount.toLocaleString()} ${category.name} jobs`}
+      />
+
+      <div className="relative z-1 pointer-events-none">
         {/* Header: Icon + Job count badge */}
         <div className="flex items-center justify-between">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 transition-colors group-hover:bg-emerald-600 group-hover:text-white dark:bg-emerald-950/40 dark:text-emerald-400 dark:group-hover:bg-emerald-600 dark:group-hover:text-white">
@@ -97,7 +109,7 @@ export function CategoryCard({ category }: CategoryCardProps) {
           </div>
 
           <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-            {category.jobCount.toLocaleString()} jobs
+            {category.jobCount.toLocaleString()} {category.jobCount === 1 ? "job" : "jobs"}
           </span>
         </div>
 
@@ -114,21 +126,23 @@ export function CategoryCard({ category }: CategoryCardProps) {
         )}
       </div>
 
-      {/* Skills tags preview */}
+      {/* Skills tags preview (clickable with higher z-index) */}
       {category.skills && category.skills.length > 0 && (
-        <div className="mt-5 pt-4 border-t border-zinc-100 dark:border-zinc-800/80">
+        <div className="mt-5 pt-4 border-t border-zinc-100 dark:border-zinc-800/80 relative z-10">
           <div className="flex flex-wrap gap-1.5">
-            {category.skills.slice(0, 3).map((skill) => (
-              <span
+            {displayedSkills.map((skill) => (
+              <Link
                 key={skill}
-                className="rounded-md bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400"
+                href={`/jobs?skill=${encodeURIComponent(skill)}`}
+                className="rounded-md bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-emerald-50 hover:text-emerald-700 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-emerald-950/60 dark:hover:text-emerald-300 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                title={`Filter jobs by skill: ${skill}`}
               >
                 {skill}
-              </span>
+              </Link>
             ))}
-            {category.skills.length > 3 && (
+            {remainingSkillsCount > 0 && (
               <span className="text-[11px] font-medium text-zinc-400 self-center">
-                +{category.skills.length - 3} more
+                +{remainingSkillsCount} more
               </span>
             )}
           </div>

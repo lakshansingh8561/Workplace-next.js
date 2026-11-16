@@ -1,9 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { getCurrentUser } from "@/lib/session";
-import { Role } from "@/types";
 import { JobsExplorer } from "@/components/jobs/JobsExplorer";
 
 export const metadata: Metadata = {
@@ -16,13 +14,9 @@ async function JobsPageContent() {
   await connection();
   const user = await getCurrentUser();
 
-  // Role-based protection: Clients should not see the freelancer's Find Work page
-  // as their landing page, nor apply to other clients' jobs.
-  if (user && user.role === Role.CLIENT) {
-    redirect("/dashboard/client");
-  }
-
-  return <JobsExplorer />;
+  // Allow CLIENT, FREELANCER, and unauthenticated public visitors
+  // to browse the public jobs marketplace.
+  return <JobsExplorer userRole={user?.role} />;
 }
 
 export default function JobsPage() {

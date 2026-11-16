@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import { connection } from "next/server";
 import {
   HeroVideo,
   MarketplaceSearch,
@@ -7,7 +9,19 @@ import {
   CallToAction,
 } from "@/components";
 import { PLATFORM_METRICS } from "@/data";
+import { getDynamicCategories } from "@/lib/jobs";
 
+async function DynamicMarketplace() {
+  await connection();
+  const dynamicCategories = await getDynamicCategories();
+
+  return (
+    <>
+      <MarketplaceSearch categories={dynamicCategories} />
+      <CategorySection initialCategories={dynamicCategories} />
+    </>
+  );
+}
 
 export default function Home() {
   return (
@@ -32,7 +46,9 @@ export default function Home() {
           </div>
 
           {/* Search bar with local interactive filtering behavior */}
-          <MarketplaceSearch />
+          <Suspense fallback={<MarketplaceSearch />}>
+            <DynamicMarketplace />
+          </Suspense>
 
           {/* Platform Metrics (rendered dynamically from data) */}
           <div className="mt-10 pt-8 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -55,28 +71,14 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 3. Popular Categories Section (dynamic grid with filter tabs) */}
-      <CategorySection />
-
-      {/* 4. Why Businesses Turn to WorkPulse */}
+      {/* 4. Why Choose WorkPulse (Value Proposition Grid) */}
       <WhyWorkPulse />
 
-      {/* 5. How It Works Section */}
+      {/* 5. How It Works (Client & Freelancer Step-by-Step Journeys) */}
       <HowItWorks />
 
-      {/* 6. Enterprise Call to Action */}
+      {/* 6. High-Conversion Dual CTA Banner */}
       <CallToAction />
-
-      {/* 7. Action Modal / Target Drawer Anchors for Post Job, Login, Signup */}
-      <div id="post-job" className="sr-only">
-        Post a job target
-      </div>
-      <div id="login" className="sr-only">
-        Log in target
-      </div>
-      <div id="signup" className="sr-only">
-        Sign up target
-      </div>
     </div>
   );
 }

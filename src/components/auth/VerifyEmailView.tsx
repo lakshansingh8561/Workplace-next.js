@@ -7,6 +7,7 @@ import {
   verifyEmailAction,
   sendEmailVerificationOtpAction,
   verifyEmailOtpAction,
+  getUserVerificationStateAction,
 } from "@/lib/actions/auth-recovery";
 
 export function VerifyEmailView() {
@@ -14,6 +15,7 @@ export function VerifyEmailView() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
   const emailParam = searchParams.get("email") || "";
+  const roleParam = searchParams.get("role") as "CLIENT" | "FREELANCER" | null;
   const isRequired = searchParams.get("required") === "true";
 
   const [, startTransition] = useTransition();
@@ -25,6 +27,9 @@ export function VerifyEmailView() {
   >(token ? "verifying_token" : "otp_entry");
 
   const [email, setEmail] = useState(emailParam);
+  const [userRole, setUserRole] = useState<"CLIENT" | "FREELANCER" | null>(
+    roleParam || null
+  );
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -39,6 +44,9 @@ export function VerifyEmailView() {
       try {
         const result = await verifyEmailAction({ token: tokenToVerify });
         if (result.success) {
+          if (result.role) {
+            setUserRole(result.role);
+          }
           if (result.alreadyVerified) {
             setStatus("alreadyVerified");
           } else {
@@ -67,18 +75,58 @@ export function VerifyEmailView() {
     }
   }, [token, handleVerifyToken]);
 
-  // If email was not passed, check client auth session fallback
+  // Sync authenticated session email ONLY if no email was supplied in URL
   useEffect(() => {
-    if (!emailParam && !email) {
-      fetch("/api/auth/session")
-        .then((res) => (res.ok ? res.json() : null))
-        .then((session) => {
-          if (session?.user?.email) {
-            setEmail(session.user.email);
-          }
-        })
-        .catch(() => {});
+    let active = true;
+    fetch("/api/auth/session")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((session) => {
+        if (!active) return;
+        if (!emailParam && session?.user?.email && !email) {
+          setEmail(session.user.email.toLowerCase());
+        }
+        if (session?.user?.role && !roleParam) {
+          setUserRole(session.user.role as "CLIENT" | "FREELANCER");
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, [emailParam, email, roleParam]);
+
+  // Keep email in sync with URL searchParams
+  useEffect(() => {
+    if (emailParam && emailParam.trim().toLowerCase() !== email.toLowerCase()) {
+      setEmail(emailParam.trim().toLowerCase());
+      setOtp(["", "", "", "", "", ""]);
+      setErrorMessage(null);
+      setSuccessMessage(null);
     }
+  }, [emailParam, email]);
+
+  // Query verification state & role by email if unverified or refreshing
+  useEffect(() => {
+    const targetEmail = (emailParam || email).trim();
+    if (!targetEmail) return;
+
+    let active = true;
+    getUserVerificationStateAction(targetEmail).then((res) => {
+      if (!active) return;
+      if (res.exists) {
+        if (res.role) {
+          setUserRole(res.role);
+        }
+        if (res.verified) {
+          setStatus("alreadyVerified");
+        }
+      }
+    });
+
+    return () => {
+      active = false;
+    };
   }, [emailParam, email]);
 
   // Countdown timer for resend button
@@ -152,7 +200,8 @@ export function VerifyEmailView() {
       return;
     }
 
-    if (!email.trim()) {
+    const targetEmail = (emailParam || email).trim().toLowerCase();
+    if (!targetEmail) {
       setErrorMessage("Please provide a valid email address.");
       return;
     }
@@ -160,11 +209,14 @@ export function VerifyEmailView() {
     startOtpTransition(async () => {
       try {
         const result = await verifyEmailOtpAction({
-          email: email.trim(),
+          email: targetEmail,
           otp: fullOtp,
         });
 
         if (result.success) {
+          if (result.role) {
+            setUserRole(result.role);
+          }
           if (result.alreadyVerified) {
             setStatus("alreadyVerified");
           } else {
@@ -185,7 +237,8 @@ export function VerifyEmailView() {
 
   // Resend OTP Action
   const handleResendOtp = () => {
-    if (resendCooldown > 0 || isResendPending || !email.trim()) return;
+    const targetEmail = (emailParam || email).trim().toLowerCase();
+    if (resendCooldown > 0 || isResendPending || !targetEmail) return;
 
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -193,7 +246,7 @@ export function VerifyEmailView() {
     startResendTransition(async () => {
       try {
         const result = await sendEmailVerificationOtpAction({
-          email: email.trim(),
+          email: targetEmail,
         });
 
         if (result.success) {
@@ -265,25 +318,20 @@ export function VerifyEmailView() {
               Email Verified Successfully!
             </h1>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-sm mx-auto">
-              Your email address ({email}) has been verified. You now have full access to apply for jobs, post requirements, message clients, and execute contracts.
+              {userRole === "CLIENT"
+                ? "Your email address has been successfully verified. You can now sign in to your WorkPulse account and discover talented freelancers for your projects."
+                : "Your email address has been successfully verified. You can now sign in to your WorkPulse account and explore freelance opportunities."}
             </p>
-            <div className="pt-3 flex flex-col gap-2">
+            <div className="pt-3">
               <button
                 type="button"
                 onClick={() => {
-                  router.push("/jobs");
-                  router.refresh();
+                  router.push("/login?verified=true");
                 }}
                 className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
               >
-                Explore Marketplace Jobs →
+                Sign In to Your Account →
               </button>
-              <Link
-                href="/login"
-                className="text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 py-1"
-              >
-                Sign In to Your Account
-              </Link>
             </div>
           </div>
         )}
@@ -310,15 +358,20 @@ export function VerifyEmailView() {
               Email Already Verified
             </h1>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-sm mx-auto">
-              This account ({email}) is already verified. You can access all WorkPulse features right away.
+              {userRole === "CLIENT"
+                ? "Your email address is already verified. You can now sign in to your WorkPulse account and discover talented freelancers for your projects."
+                : "Your email address is already verified. You can now sign in to your WorkPulse account and explore freelance opportunities."}
             </p>
             <div className="pt-3">
-              <Link
-                href="/jobs"
-                className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all"
+              <button
+                type="button"
+                onClick={() => {
+                  router.push("/login");
+                }}
+                className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
               >
-                Go to Marketplace
-              </Link>
+                Sign In to Your Account →
+              </button>
             </div>
           </div>
         )}
@@ -357,6 +410,11 @@ export function VerifyEmailView() {
               ) : (
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
                   Enter your email address and 6-digit verification code below.
+                </p>
+              )}
+              {process.env.NODE_ENV !== "production" && (
+                <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                  ⚡ Dev mode: Check your server terminal if using a temporary inbox (like YOPmail).
                 </p>
               )}
             </div>

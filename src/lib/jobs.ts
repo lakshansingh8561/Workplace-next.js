@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { SEED_JOBS } from "@/data/jobs";
-import { Job, JobPagination, JobFilterFacets } from "@/types";
+import { Job, JobPagination, JobFilterFacets, Category } from "@/types";
 import { PaymentType, ExperienceLevel, Prisma } from "@prisma/client";
 
 /**
@@ -124,15 +124,31 @@ export async function getJobFilterOptions(): Promise<JobFilterFacets> {
   }
 
   try {
+    const now = new Date();
     // 2. Execute bounded MongoDB aggregation pipeline via $facet
     const rawResult = (await prisma.job.aggregateRaw({
       pipeline: [
-        { $match: { status: "OPEN" } },
+        {
+          $match: {
+            status: "OPEN",
+            $or: [
+              { expiresAt: null },
+              { expiresAt: { $exists: false } },
+              { expiresAt: { $gt: { $date: now.toISOString() } } },
+            ],
+          },
+        },
         {
           $facet: {
             categories: [
               { $match: { category: { $ne: null, $exists: true } } },
-              { $group: { _id: "$category", count: { $sum: 1 } } },
+              {
+                $group: {
+                  _id: "$category",
+                  count: { $sum: 1 },
+                  skillsArray: { $push: "$skills" },
+                },
+              },
               { $sort: { count: -1 } },
             ],
             skills: [
@@ -171,7 +187,7 @@ export async function getJobFilterOptions(): Promise<JobFilterFacets> {
         },
       ],
     })) as unknown as Array<{
-      categories?: Array<{ _id: string; count: number }>;
+      categories?: Array<{ _id: string; count: number; skillsArray?: unknown[] }>;
       skills?: Array<{ _id: string; count: number }>;
       budgetBounds?: Array<{ _id: null; min?: number; max?: number }>;
     }>;
@@ -179,7 +195,38 @@ export async function getJobFilterOptions(): Promise<JobFilterFacets> {
     const facetData = rawResult?.[0];
     const categories = (facetData?.categories || [])
       .filter((c) => Boolean(c._id))
-      .map((c) => ({ category: String(c._id), count: Number(c.count) || 0 }));
+      .map((c) => {
+        const flattened: string[] = [];
+        if (Array.isArray(c.skillsArray)) {
+          for (const item of c.skillsArray) {
+            if (Array.isArray(item)) {
+              for (const s of item) {
+                if (typeof s === "string" && s.trim().length > 0) {
+                  flattened.push(s.trim());
+                }
+              }
+            } else if (typeof item === "string" && item.trim().length > 0) {
+              flattened.push(item.trim());
+            }
+          }
+        }
+
+        // Count frequency of skills within this category to rank top relevant skills
+        const skillCounts: Record<string, number> = {};
+        for (const s of flattened) {
+          skillCounts[s] = (skillCounts[s] || 0) + 1;
+        }
+
+        const sortedSkills = Object.entries(skillCounts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([name]) => name);
+
+        return {
+          category: String(c._id),
+          count: Number(c.count) || 0,
+          skills: sortedSkills,
+        };
+      });
 
     const skills = (facetData?.skills || [])
       .filter((s) => Boolean(s._id))
@@ -209,13 +256,119 @@ export async function getJobFilterOptions(): Promise<JobFilterFacets> {
 
     return facets;
   } catch (error) {
-    console.error("[WorkPulse Filter Options Error]:", error);
-    return {
-      categories: [],
-      skills: [],
-      budgetBounds: { min: 0, max: 10000 },
-    };
+    console.warn(
+      "[WorkPulse Jobs Filter Options Aggregation Warning]:",
+      error instanceof Error ? error.message : "Database temporarily unavailable, using fallback facets."
+    );
+    return getFallbackFilterOptions();
   }
+}
+
+export type CategoryGroupId = "all" | "tech" | "creative" | "business";
+
+export const CATEGORY_GROUP_MAPPING: Record<CategoryGroupId, string[]> = {
+  all: [],
+  tech: [
+    "development & it",
+    "ai services & ml",
+    "engineering & architecture",
+    "data science",
+  ],
+  creative: [
+    "design & creative",
+    "writing & translation",
+  ],
+  business: [
+    "sales & marketing",
+    "marketing & sales",
+    "admin & customer support",
+    "finance & accounting",
+  ],
+};
+
+export function matchesCategoryGroup(categoryName: string, groupId: CategoryGroupId | string): boolean {
+  if (!groupId || groupId === "all") return true;
+  const normalized = categoryName.toLowerCase().trim();
+  const allowed = CATEGORY_GROUP_MAPPING[groupId as CategoryGroupId] || [];
+  return allowed.some((a) => normalized.includes(a) || a.includes(normalized));
+}
+
+export const CATEGORY_METADATA: Record<
+  string,
+  { icon: string; description: string }
+> = {
+  "development & it": {
+    icon: "code",
+    description: "Software engineers, web developers, mobile app architects & DevOps.",
+  },
+  "ai services & ml": {
+    icon: "cpu",
+    description: "Prompt engineers, LLM fine-tuners, data scientists & vision models.",
+  },
+  "design & creative": {
+    icon: "palette",
+    description: "UI/UX designers, brand strategists, animators & product illustrators.",
+  },
+  "sales & marketing": {
+    icon: "trending-up",
+    description: "SEO specialists, performance marketers, growth hackers & media buyers.",
+  },
+  "marketing & sales": {
+    icon: "trending-up",
+    description: "SEO specialists, performance marketers, growth hackers & media buyers.",
+  },
+  "writing & translation": {
+    icon: "file-text",
+    description: "Technical copywriters, localization specialists & content editors.",
+  },
+  "admin & customer support": {
+    icon: "headset",
+    description: "Executive virtual assistants, Zendesk specialists & data entry experts.",
+  },
+  "finance & accounting": {
+    icon: "calculator",
+    description: "Certified public accountants, CFO consultants & bookkeeping pros.",
+  },
+  "engineering & architecture": {
+    icon: "layers",
+    description: "CAD draftsmen, structural engineers & 3D architectural visualizers.",
+  },
+};
+
+/**
+ * Returns dynamic, database-driven categories with verified job counts and top skills.
+ * Only returns categories with at least 1 eligible OPEN job.
+ */
+export async function getDynamicCategories(): Promise<Category[]> {
+  const facets = await getJobFilterOptions();
+  if (!facets.categories || facets.categories.length === 0) {
+    return [];
+  }
+
+  return facets.categories
+    .filter((cat) => cat.count > 0 && cat.category)
+    .map((cat) => {
+      const normalizedName = cat.category.toLowerCase().trim();
+      const meta = CATEGORY_METADATA[normalizedName] || {
+        icon: "layers",
+        description: `Explore specialized skills and contracts in ${cat.category}.`,
+      };
+
+      const slug = cat.category
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+
+      return {
+        id: slug || `cat-${Date.now()}`,
+        name: cat.category, // Exact database category name
+        slug,
+        icon: meta.icon,
+        jobCount: cat.count,
+        description: meta.description,
+        skills: cat.skills || [],
+      };
+    });
 }
 
 /**
@@ -236,8 +389,16 @@ export async function getJobs(rawParams: unknown): Promise<{
   }
 
   try {
+    const now = new Date();
     const andConditions: Prisma.JobWhereInput[] = [
       { status: "OPEN" }, // Strictly discoverable jobs only
+      {
+        OR: [
+          { expiresAt: { isSet: false } },
+          { expiresAt: null },
+          { expiresAt: { gt: now } },
+        ],
+      },
     ];
 
     // 1. Category Filter
@@ -470,14 +631,21 @@ export async function getJobById(id: string): Promise<{
  * Development fallback filter options for SEED_JOBS.
  */
 function getFallbackFilterOptions(): JobFilterFacets {
-  const categoryMap = new Map<string, number>();
+  const categoryMap = new Map<string, { count: number; skills: string[] }>();
   const skillMap = new Map<string, number>();
   let minBudget = Infinity;
   let maxBudget = 0;
 
   for (const job of SEED_JOBS) {
     if (job.category) {
-      categoryMap.set(job.category, (categoryMap.get(job.category) || 0) + 1);
+      const existing = categoryMap.get(job.category) || { count: 0, skills: [] };
+      existing.count += 1;
+      if (Array.isArray(job.skills)) {
+        for (const s of job.skills) {
+          if (!existing.skills.includes(s)) existing.skills.push(s);
+        }
+      }
+      categoryMap.set(job.category, existing);
     }
     if (Array.isArray(job.skills)) {
       for (const skill of job.skills) {
@@ -492,9 +660,10 @@ function getFallbackFilterOptions(): JobFilterFacets {
   }
 
   return {
-    categories: Array.from(categoryMap.entries()).map(([category, count]) => ({
+    categories: Array.from(categoryMap.entries()).map(([category, val]) => ({
       category,
-      count,
+      count: val.count,
+      skills: val.skills,
     })),
     skills: Array.from(skillMap.entries())
       .map(([skill, count]) => ({ skill, count }))

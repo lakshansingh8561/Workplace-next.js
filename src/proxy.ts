@@ -26,6 +26,17 @@ export function handleRouteProtection(req: {
     return NextResponse.redirect(loginUrl);
   }
 
+  // Prevent cross-role direct URL access
+  const authSession = req.auth as { user?: { role?: string } } | undefined;
+  const userRole = authSession?.user?.role;
+
+  if (userRole === "CLIENT" && pathname.startsWith("/dashboard/freelancer")) {
+    return NextResponse.redirect(new URL("/dashboard/client", origin));
+  }
+  if (userRole === "FREELANCER" && pathname.startsWith("/dashboard/client")) {
+    return NextResponse.redirect(new URL("/dashboard/freelancer", origin));
+  }
+
   return NextResponse.next();
 }
 

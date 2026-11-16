@@ -57,13 +57,34 @@ export function LoginForm() {
         if (result && !result.success) {
           setError(result.error || "Invalid credentials.");
         } else {
-          const target = rawRedirect
-            ? sanitizeRedirectPath(rawRedirect)
-            : result?.role === "CLIENT"
-            ? "/dashboard/client"
-            : result?.role === "FREELANCER"
-            ? "/dashboard/freelancer"
-            : "/dashboard";
+          const role = result?.role;
+          let target = "/dashboard";
+
+          if (role === "CLIENT") {
+            // Clients must never be redirected to /jobs or freelancer-only paths
+            if (
+              rawRedirect &&
+              rawRedirect !== "/jobs" &&
+              !rawRedirect.startsWith("/dashboard/freelancer")
+            ) {
+              target = sanitizeRedirectPath(rawRedirect);
+            } else {
+              target = "/dashboard/client";
+            }
+          } else if (role === "FREELANCER") {
+            // Freelancers must not be redirected to client-only dashboard paths
+            if (
+              rawRedirect &&
+              !rawRedirect.startsWith("/dashboard/client")
+            ) {
+              target = sanitizeRedirectPath(rawRedirect);
+            } else {
+              target = "/dashboard/freelancer";
+            }
+          } else {
+            target = rawRedirect ? sanitizeRedirectPath(rawRedirect) : "/dashboard";
+          }
+
           router.push(target);
           router.refresh();
         }

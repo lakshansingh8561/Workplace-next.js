@@ -38,7 +38,9 @@ export function SignupForm() {
           setFieldErrors(result.fieldErrors);
         }
       } else {
-        router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+        router.push(
+          `/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}&role=${role}`
+        );
       }
     });
   };
