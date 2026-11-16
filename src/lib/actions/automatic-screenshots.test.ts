@@ -86,7 +86,7 @@ describe("Automatic Work Screenshots Cadence & Lifecycle Regression Tests", () =
 
       expect(formatCountdown(600)).toBe("10:00");
       expect(formatCountdown(599)).toBe("9:59");
-      expect(formatCountdown(65)).toBe("1:05");
+      expect(formatCountdown(65)).toBe("1:05");   
       expect(formatCountdown(9)).toBe("0:09");
       expect(formatCountdown(0)).toBe("0:00");
     });
@@ -228,7 +228,7 @@ describe("Automatic Work Screenshots Cadence & Lifecycle Regression Tests", () =
         contract: {
           type: PaymentType.HOURLY,
         },
-      } as any);
+      } as any);                                                 
 
       let createdPayload: any = null;
       (vi.mocked(prisma.timeScreenshot.create) as any).mockImplementation(async (args: any) => {
