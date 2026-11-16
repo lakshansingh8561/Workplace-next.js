@@ -88,6 +88,7 @@ export function PostJobForm({ userName }: PostJobFormProps) {
           setFieldErrors(result.fieldErrors);
         }
       } else if (result.jobId) {
+        router.refresh();
         if (targetStatus === "DRAFT") {
           router.push("/dashboard/client?status=DRAFT");
         } else {

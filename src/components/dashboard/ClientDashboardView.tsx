@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { updateJobStatusAction } from "@/lib/actions/job";
@@ -137,6 +137,15 @@ export function ClientDashboardView({
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [hireFreelancer, setHireFreelancer] = useState<ClientDashboardFreelancer | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Sync internal state immediately whenever server data updates
+  useEffect(() => {
+    setJobs(initialJobs);
+  }, [initialJobs]);
+
+  useEffect(() => {
+    setSearchTerm(searchQuery);
+  }, [searchQuery]);
 
   const handleStatusFilter = (status: string) => {
     const params = new URLSearchParams(searchParams.toString());

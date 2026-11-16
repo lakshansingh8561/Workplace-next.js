@@ -498,6 +498,31 @@ export async function getOrCreateDirectConversationAction(
           error: "Selected recipient is not an active client.",
         };
       }
+
+      // Enforce: Freelancers can only message clients if they have an active proposal or contract with that client
+      const [proposalRelationship, contractRelationship] = await Promise.all([
+        prisma.proposal.findFirst({
+          where: {
+            freelancerId: user.id,
+            job: { clientId: actualClientId },
+          },
+          select: { id: true },
+        }),
+        prisma.contract.findFirst({
+          where: {
+            freelancerId: user.id,
+            clientId: actualClientId,
+          },
+          select: { id: true },
+        }),
+      ]);
+
+      if (!proposalRelationship && !contractRelationship) {
+        return {
+          success: false,
+          error: "Freelancers can only message clients after submitting a proposal or having an active contract for their jobs.",
+        };
+      }
     }
 
     // 1. Check for ANY existing conversation between this client and freelancer

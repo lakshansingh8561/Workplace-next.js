@@ -30,14 +30,26 @@ export function NotificationBell() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = async () => {
+    // Only poll when the document is currently visible and online
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      return;
+    }
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      return;
+    }
+
     try {
       const res = await getNotificationsAction(40);
-      if (res.success && res.notifications) {
+      if (res?.success && res.notifications) {
         setNotifications(res.notifications);
         setUnreadCount(res.unreadCount || 0);
       }
     } catch (err) {
-      console.error("Failed to load notifications:", err);
+      // Gracefully handle network hiccups or page unload interruptions
+      if (err instanceof Error && (err.name === "AbortError" || err.message.includes("Failed to fetch"))) {
+        return;
+      }
+      console.warn("[WorkPulse Notifications Warning]:", err instanceof Error ? err.message : "Polling interrupted");
     }
   };
 
@@ -45,20 +57,26 @@ export function NotificationBell() {
     let ignore = false;
 
     async function loadInitial() {
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
       try {
         const res = await getNotificationsAction(40);
-        if (!ignore && res.success && res.notifications) {
+        if (!ignore && res?.success && res.notifications) {
           setNotifications(res.notifications);
           setUnreadCount(res.unreadCount || 0);
         }
       } catch (err) {
-        console.error("Failed to load notifications:", err);
+        if (!ignore) {
+          if (err instanceof Error && (err.name === "AbortError" || err.message.includes("Failed to fetch"))) {
+            return;
+          }
+          console.warn("[WorkPulse Notifications Warning]:", err instanceof Error ? err.message : "Initial load interrupted");
+        }
       }
     }
 
     loadInitial();
 
-    // Sane polling: refresh every 25 seconds
+    // Sane polling: refresh every 25 seconds when visible
     const interval = setInterval(() => {
       fetchNotifications();
     }, 25000);

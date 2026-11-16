@@ -955,8 +955,16 @@ export interface FreelancerProposalItem {
     hourlyMin?: number | null;
     hourlyMax?: number | null;
     status: string;
+    clientId?: string | null;
     clientName?: string | null;
     clientCountry?: string | null;
+    client?: {
+      id: string;
+      name?: string | null;
+      companyName?: string | null;
+      image?: string | null;
+      location?: string | null;
+    } | null;
     isArchived: boolean;
   };
   contract?: {
@@ -1066,8 +1074,18 @@ export async function getFreelancerProposals(params: {
               hourlyMin: true,
               hourlyMax: true,
               status: true,
+              clientId: true,
               clientName: true,
               clientCountry: true,
+              client: {
+                select: {
+                  id: true,
+                  name: true,
+                  companyName: true,
+                  image: true,
+                  location: true,
+                },
+              },
             },
           },
           contract: {
@@ -1099,8 +1117,10 @@ export async function getFreelancerProposals(params: {
               hourlyMin: p.job.hourlyMin,
               hourlyMax: p.job.hourlyMax,
               status: p.job.status,
+              clientId: p.job.clientId,
               clientName: p.job.clientName,
               clientCountry: p.job.clientCountry,
+              client: p.job.client,
               isArchived: false,
             }
           : {
@@ -1112,8 +1132,10 @@ export async function getFreelancerProposals(params: {
               hourlyMin: null,
               hourlyMax: null,
               status: "CLOSED",
+              clientId: null,
               clientName: null,
               clientCountry: null,
+              client: null,
               isArchived: true,
             },
         contract: p.contract

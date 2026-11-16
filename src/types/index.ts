@@ -51,11 +51,17 @@ export interface Job {
   client?: {
     id: string;
     name?: string | null;
+    image?: string | null;
     companyName?: string | null;
     companyDescription?: string | null;
     companyWebsite?: string | null;
     companyIndustry?: string | null;
     location?: string | null;
+    createdAt?: string | Date | null;
+    _count?: {
+      jobs?: number;
+      clientContracts?: number;
+    } | null;
   } | null;
   createdAt: string | Date;
   updatedAt?: string | Date;

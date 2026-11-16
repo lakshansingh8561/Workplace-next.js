@@ -7,6 +7,8 @@ import {
   FreelancerProposalItem,
   FreelancerProposalsCounts,
 } from "@/lib/actions/proposal";
+import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
+import { Avatar } from "@/components/ui/Avatar";
 import { formatDate } from "@/lib/utils";
 
 interface FreelancerProposalsViewProps {
@@ -31,6 +33,23 @@ export function FreelancerProposalsView({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState(searchQuery);
+  const [activeChatProposalId, setActiveChatProposalId] = useState<string | null>(null);
+
+  const handleMessageClient = async (proposal: FreelancerProposalItem) => {
+    const targetClientId = proposal.job.clientId || proposal.job.client?.id;
+    if (!targetClientId) return;
+    setActiveChatProposalId(proposal.id);
+    try {
+      const res = await getOrCreateDirectConversationAction(targetClientId, proposal.job.id);
+      if (res.success && res.conversationId) {
+        router.push(`/messages?conversationId=${res.conversationId}`);
+      }
+    } catch (err) {
+      console.error("Failed to connect to client chat:", err);
+    } finally {
+      setActiveChatProposalId(null);
+    }
+  };
 
   const handleStatusFilter = (status: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -290,6 +309,33 @@ export function FreelancerProposalsView({
                         {proposal.coverLetter}
                       </p>
                     </div>
+
+                    {/* Client Information Snippet */}
+                    {(proposal.job.client || proposal.job.clientName) && (
+                      <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl bg-zinc-50 p-2.5 sm:p-3 border border-zinc-100 dark:bg-zinc-800/40 dark:border-zinc-800 text-xs">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Avatar
+                            src={proposal.job.client?.image}
+                            name={proposal.job.client?.companyName || proposal.job.client?.name || proposal.job.clientName || "Client"}
+                            role="CLIENT"
+                            size="sm"
+                          />
+                          <div className="min-w-0">
+                            <p className="font-bold text-zinc-900 dark:text-white truncate text-xs">
+                              {proposal.job.client?.companyName || proposal.job.client?.name || proposal.job.clientName}
+                            </p>
+                            {(proposal.job.client?.location || proposal.job.clientCountry) && (
+                              <p className="text-[11px] text-zinc-400 truncate">
+                                📍 {proposal.job.client?.location || proposal.job.clientCountry}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <span className="shrink-0 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                          ✓ Verified Client
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Right Column: Status Badge & Actions */}
@@ -319,6 +365,28 @@ export function FreelancerProposalsView({
                         <span>View Contract</span>
                         <span>→</span>
                       </Link>
+                    )}
+
+                    {/* Message Client Action */}
+                    {!proposal.job.isArchived && (proposal.job.clientId || proposal.job.client?.id) && (
+                      <button
+                        type="button"
+                        disabled={activeChatProposalId === proposal.id}
+                        onClick={() => handleMessageClient(proposal)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition active:scale-95 disabled:opacity-50"
+                      >
+                        {activeChatProposalId === proposal.id ? (
+                          <>
+                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                            <span>Connecting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>💬 Message Client</span>
+                            <span>→</span>
+                          </>
+                        )}
+                      </button>
                     )}
 
                     {/* Job Details Link */}

@@ -604,11 +604,19 @@ export async function getJobById(id: string): Promise<{
           select: {
             id: true,
             name: true,
+            image: true,
             companyName: true,
             companyDescription: true,
             companyWebsite: true,
             companyIndustry: true,
             location: true,
+            createdAt: true,
+            _count: {
+              select: {
+                jobs: true,
+                clientContracts: true,
+              },
+            },
           },
         },
       },

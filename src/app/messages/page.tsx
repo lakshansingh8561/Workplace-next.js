@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import {
   getConversationsAction,
   getOrCreateConversationForContractAction,
+  getOrCreateDirectConversationAction,
 } from "@/lib/actions/message";
 import { MessagingLayout } from "@/components/messages/MessagingLayout";
 
@@ -29,7 +30,19 @@ async function MessagesContent({ searchParams }: MessagesPageProps) {
   const conversationIdParam =
     typeof resolvedParams.conversationId === "string"
       ? resolvedParams.conversationId
+      : typeof resolvedParams.id === "string"
+      ? resolvedParams.id
       : undefined;
+  const counterpartyParam =
+    typeof resolvedParams.clientId === "string"
+      ? resolvedParams.clientId
+      : typeof resolvedParams.freelancerId === "string"
+      ? resolvedParams.freelancerId
+      : typeof resolvedParams.userId === "string"
+      ? resolvedParams.userId
+      : undefined;
+  const jobIdParam =
+    typeof resolvedParams.jobId === "string" ? resolvedParams.jobId : undefined;
 
   let activeConversationId: string | null = conversationIdParam || null;
   let contractResolutionError: string | null = null;
@@ -41,6 +54,13 @@ async function MessagesContent({ searchParams }: MessagesPageProps) {
       activeConversationId = res.conversationId;
     } else {
       contractResolutionError = res.error || "Unable to load conversation for this contract.";
+    }
+  } else if (!activeConversationId && counterpartyParam) {
+    const res = await getOrCreateDirectConversationAction(counterpartyParam, jobIdParam);
+    if (res.success && res.conversationId) {
+      activeConversationId = res.conversationId;
+    } else if (res.error) {
+      contractResolutionError = res.error;
     }
   }
 

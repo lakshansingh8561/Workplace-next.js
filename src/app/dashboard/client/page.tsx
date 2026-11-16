@@ -177,7 +177,7 @@ async function ClientDashboardContent({
 
   return (
     <ClientDashboardView
-      key={`${statusParam || "ALL"}-${searchQuery}-${page}`}
+      key={`${statusParam || "ALL"}-${searchQuery}-${page}-${totalJobs}-${jobs[0]?.id || "empty"}`}
       jobs={jobs}
       totalJobs={totalJobs}
       currentPage={page}

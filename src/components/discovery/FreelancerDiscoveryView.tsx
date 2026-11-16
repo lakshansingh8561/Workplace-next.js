@@ -355,6 +355,19 @@ export function FreelancerDiscoveryView({
         </div>
       </div>
 
+      {chatError && (
+        <div className="mb-6 rounded-2xl bg-amber-50 p-4 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-900 text-xs sm:text-sm font-semibold text-amber-800 dark:text-amber-300 flex items-center justify-between">
+          <span>⚠️ {chatError}</span>
+          <button
+            type="button"
+            onClick={() => setChatError(null)}
+            className="text-xs font-bold hover:text-amber-950"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Grid of Freelancer Cards */}
       {freelancers.length === 0 ? (
         <div className="rounded-3xl border border-zinc-200 bg-white p-12 text-center shadow-xs dark:border-zinc-800 dark:bg-zinc-900">

@@ -2,14 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Job, JobApiResponse } from "@/types";
 import { SessionUser } from "@/lib/session";
 import {
   FreelancerProposalSummary,
   getFreelancerProposalForJob,
 } from "@/lib/actions/proposal";
+import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
 import { ApplyProposalModal } from "./ApplyProposalModal";
 import { SaveJobButton } from "./SaveJobButton";
+import { Avatar } from "@/components/ui/Avatar";
 import { isSafeHttpUrl } from "@/lib/validations/profile";
 
 interface JobDetailsViewProps {
@@ -27,6 +30,7 @@ export function JobDetailsView({
   initialProposal,
   initialSaved = false,
 }: JobDetailsViewProps) {
+  const router = useRouter();
   const [fetchedJob, setFetchedJob] = useState<Job | null>(null);
   const [clientUser, setClientUser] = useState<SessionUser | null>(null);
   const [submittedProposal, setSubmittedProposal] = useState<FreelancerProposalSummary>(null);
@@ -34,11 +38,32 @@ export function JobDetailsView({
   const [error, setError] = useState<string | null>(null);
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [isConnectingChat, setIsConnectingChat] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   // Directly derive values from initial props with fallback to client state
   const job = fetchedJob ?? initialJob ?? null;
   const user = initialUser ?? clientUser;
   const userProposal = submittedProposal !== null ? submittedProposal : (initialProposal ?? null);
+
+  const handleMessageClient = async () => {
+    const targetClientId = job?.clientId || job?.client?.id;
+    if (!targetClientId) return;
+    setIsConnectingChat(true);
+    setChatError(null);
+    try {
+      const res = await getOrCreateDirectConversationAction(targetClientId, job?.id);
+      if (res.success && res.conversationId) {
+        router.push(`/messages?conversationId=${res.conversationId}`);
+      } else {
+        setChatError(res.error || "Unable to start conversation with client.");
+      }
+    } catch {
+      setChatError("Failed to initiate chat. Please try again.");
+    } finally {
+      setIsConnectingChat(false);
+    }
+  };
 
   // Client-side session fallback if initialUser was not passed or null
   useEffect(() => {
@@ -198,18 +223,28 @@ export function JobDetailsView({
 
       {/* Success Notification Banner */}
       {successBanner && (
-        <div className="mb-6 rounded-2xl bg-emerald-50 p-4 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 text-sm font-medium text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+        <div className="mb-6 rounded-2xl bg-emerald-50 p-4 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 text-sm font-medium text-emerald-800 dark:text-emerald-300 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span>🎉</span>
             <span>{successBanner}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setSuccessBanner(null)}
-            className="text-emerald-700 hover:text-emerald-900 dark:text-emerald-400 text-xs font-bold"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={isConnectingChat}
+              onClick={handleMessageClient}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-500 transition active:scale-95 disabled:opacity-50"
+            >
+              {isConnectingChat ? "Connecting..." : "Message Client →"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSuccessBanner(null)}
+              className="text-emerald-700 hover:text-emerald-900 dark:text-emerald-400 text-xs font-bold"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 
@@ -378,13 +413,33 @@ export function JobDetailsView({
                   </Link>
                 )}
                 {isFreelancer && userProposal && (
-                  <div className="rounded-2xl bg-zinc-50 p-3.5 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-zinc-600 dark:text-zinc-400">Your Proposal:</span>
-                      <span className="px-2 py-0.5 rounded-full font-bold uppercase text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
-                        {userProposal.status}
-                      </span>
+                  <div className="space-y-3">
+                    <div className="rounded-2xl bg-zinc-50 p-3.5 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-zinc-600 dark:text-zinc-400">Your Proposal:</span>
+                        <span className="px-2 py-0.5 rounded-full font-bold uppercase text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
+                          {userProposal.status}
+                        </span>
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      disabled={isConnectingChat}
+                      onClick={handleMessageClient}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-md transition hover:bg-emerald-500 active:scale-95 disabled:opacity-50"
+                    >
+                      {isConnectingChat ? (
+                        <>
+                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          <span>Connecting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>💬 Message Client</span>
+                          <span>→</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 )}
               </div>
@@ -501,6 +556,30 @@ export function JobDetailsView({
                     <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900 text-center font-medium">
                       ✓ Proposal active and submitted to client
                     </div>
+
+                    <button
+                      type="button"
+                      disabled={isConnectingChat}
+                      onClick={handleMessageClient}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-md transition hover:bg-emerald-500 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:opacity-50"
+                    >
+                      {isConnectingChat ? (
+                        <>
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          <span>Connecting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>💬 Message Client</span>
+                          <span>→</span>
+                        </>
+                      )}
+                    </button>
+                    {chatError && (
+                      <p className="text-center text-xs text-rose-600 dark:text-rose-400 font-semibold">
+                        {chatError}
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -541,19 +620,106 @@ export function JobDetailsView({
               About the Client
             </h3>
 
-            <div className="mt-4 space-y-3 text-xs text-zinc-600 dark:text-zinc-300">
-              <div>
-                <p className="text-zinc-400 font-medium">Organization / Company</p>
-                <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
-                  {job.client?.companyName || job.clientName || "Enterprise Client"}
-                </p>
-                {job.client?.companyIndustry && (
-                  <span className="inline-block mt-1 rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-                    {job.client.companyIndustry}
-                  </span>
-                )}
+            <div className="mt-4 space-y-4 text-xs text-zinc-600 dark:text-zinc-300">
+              {/* Client Avatar and Identity */}
+              <div className="flex items-center gap-3">
+                <Avatar
+                  src={job.client?.image}
+                  name={job.client?.companyName || job.client?.name || job.clientName || "Client"}
+                  role="CLIENT"
+                  size="lg"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="font-extrabold text-sm text-zinc-900 dark:text-white truncate">
+                    {job.client?.companyName || job.client?.name || job.clientName || "Hiring Client"}
+                  </p>
+                  {job.client?.companyName && job.client?.name && (
+                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                      {job.client.name}
+                    </p>
+                  )}
+                  {job.client?.companyIndustry && (
+                    <span className="inline-block mt-1 rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                      {job.client.companyIndustry}
+                    </span>
+                  )}
+                </div>
               </div>
 
+              {/* Company Description */}
+              {job.client?.companyDescription && (
+                <p className="text-zinc-600 dark:text-zinc-300 text-xs leading-relaxed line-clamp-3">
+                  {job.client.companyDescription}
+                </p>
+              )}
+
+              {/* Location */}
+              {(job.client?.location || job.clientCountry) && (
+                <div>
+                  <p className="text-zinc-400 font-medium">Location</p>
+                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
+                    📍 {job.client?.location || job.clientCountry}
+                  </p>
+                </div>
+              )}
+
+              {/* Member Since */}
+              {job.client?.createdAt && (
+                <div>
+                  <p className="text-zinc-400 font-medium">Member Since</p>
+                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
+                    🗓️ {new Date(job.client.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                  </p>
+                </div>
+              )}
+
+              {/* Jobs Posted / History */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <p className="text-zinc-400 font-medium">Jobs Posted</p>
+                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
+                    {job.client?._count?.jobs ?? 1} jobs
+                  </p>
+                </div>
+                <div>
+                  <p className="text-zinc-400 font-medium">Contracts</p>
+                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
+                    {job.client?._count?.clientContracts ?? 0} active/done
+                  </p>
+                </div>
+              </div>
+
+              {/* Rating */}
+              {job.clientRating && (
+                <div>
+                  <p className="text-zinc-400 font-medium">Feedback Rating</p>
+                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5 flex items-center gap-1">
+                    <span className="text-amber-400">★</span>
+                    <span>{job.clientRating.toFixed(2)} of 5 stars</span>
+                  </p>
+                </div>
+              )}
+
+              {/* Total Spent */}
+              {job.clientSpent && (
+                <div>
+                  <p className="text-zinc-400 font-medium">Total Spent</p>
+                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
+                    ${job.clientSpent.toLocaleString()} on freelance contracts
+                  </p>
+                </div>
+              )}
+
+              {/* Payment Verification */}
+              {job.clientPaymentVerified && (
+                <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                    ✓ Payment method verified
+                  </span>
+                </div>
+              )}
+
+              {/* Website */}
               {job.client?.companyWebsite && (
                 <div>
                   <p className="text-zinc-400 font-medium">Website</p>
@@ -572,42 +738,6 @@ export function JobDetailsView({
                       {job.client.companyWebsite} (unverified)
                     </span>
                   )}
-                </div>
-              )}
-
-              {(job.client?.location || job.clientCountry) && (
-                <div>
-                  <p className="text-zinc-400 font-medium">Location</p>
-                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
-                    📍 {job.client?.location || job.clientCountry}
-                  </p>
-                </div>
-              )}
-
-              {job.clientRating && (
-                <div>
-                  <p className="text-zinc-400 font-medium">Feedback Rating</p>
-                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5 flex items-center gap-1">
-                    <span className="text-amber-400">★</span>
-                    <span>{job.clientRating.toFixed(2)} of 5 stars</span>
-                  </p>
-                </div>
-              )}
-
-              {job.clientSpent && (
-                <div>
-                  <p className="text-zinc-400 font-medium">Total Spent</p>
-                  <p className="font-semibold text-zinc-900 dark:text-white mt-0.5">
-                    ${job.clientSpent.toLocaleString()} on freelance contracts
-                  </p>
-                </div>
-              )}
-
-              {job.clientPaymentVerified && (
-                <div className="pt-2">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
-                    ✓ Payment method verified
-                  </span>
                 </div>
               )}
             </div>
