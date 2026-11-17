@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useTransition } from "react";
+import { useState, useEffect, useCallback, useTransition, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -14,33 +14,52 @@ import { JobFilters } from "./JobFilters";
 import { JobPagination } from "./JobPagination";
 import { JobSkeleton } from "./JobSkeleton";
 import { getSavedJobIdsAction } from "@/lib/actions/savedJob";
+import { useAppDispatch, useAppSelector } from "@/lib/store";
+import {
+  setFacets as setReduxFacets,
+  setSavedJobIds as setReduxSavedJobIds,
+  toggleSavedJobId as toggleReduxSavedJobId,
+} from "@/lib/store/slices/jobsSlice";
+import {
+  setMobileFiltersOpen as setReduxMobileFiltersOpen,
+} from "@/lib/store/slices/uiSlice";
 
 export interface JobsExplorerProps {
   userRole?: string | null;
+  initialJobs?: Job[];
+  initialPagination?: PaginationType;
+  initialFacets?: JobFilterFacets;
 }
 
-export function JobsExplorer({ userRole: initialUserRole }: JobsExplorerProps = {}) {
+export function JobsExplorer({
+  userRole: initialUserRole,
+  initialJobs,
+  initialPagination,
+  initialFacets,
+}: JobsExplorerProps = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
+  const dispatch = useAppDispatch();
 
-  const [activeRole, setActiveRole] = useState<string | null>(initialUserRole ?? null);
+  const reduxUser = useAppSelector((state) => state.auth.user);
+  const reduxSavedJobIds = useAppSelector((state) => state.jobs.savedJobIds);
+  const reduxFacets = useAppSelector((state) => state.jobs.facets);
+
+  const [activeRole, setActiveRole] = useState<string | null>(
+    initialUserRole ?? reduxUser?.role ?? null
+  );
 
   useEffect(() => {
     if (initialUserRole !== undefined) {
       setActiveRole(initialUserRole);
       return;
     }
-    fetch("/api/auth/session")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((session) => {
-        if (session?.user?.role) {
-          setActiveRole(session.user.role);
-        }
-      })
-      .catch(() => {});
-  }, [initialUserRole]);
+    if (reduxUser?.role) {
+      setActiveRole(reduxUser.role);
+    }
+  }, [initialUserRole, reduxUser?.role]);
 
   // URL query parameters synchronization
   const searchParam = searchParams.get("search") || "";
@@ -56,39 +75,48 @@ export function JobsExplorer({ userRole: initialUserRole }: JobsExplorerProps = 
   // Local state
   const [prevSearchParam, setPrevSearchParam] = useState(searchParam);
   const [searchInput, setSearchInput] = useState(searchParam);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [savedJobIds, setSavedJobIds] = useState<Set<string>>(new Set());
-  const [facets, setFacets] = useState<JobFilterFacets | undefined>(undefined);
-  const [pagination, setPagination] = useState<PaginationType>({
-    total: 0,
-    page: 1,
-    limit: 10,
-    totalPages: 1,
-  });
-  const [isLoading, setIsLoading] = useState(true);
+  const [jobs, setJobs] = useState<Job[]>(initialJobs || []);
+  const [savedJobIds, setSavedJobIds] = useState<Set<string>>(
+    new Set(reduxSavedJobIds)
+  );
+  const [facets, setFacets] = useState<JobFilterFacets | undefined>(
+    initialFacets || reduxFacets || undefined
+  );
+  const [pagination, setPagination] = useState<PaginationType>(
+    initialPagination || {
+      total: initialJobs?.length || 0,
+      page: pageParam,
+      limit: 10,
+      totalPages: 1,
+    }
+  );
+  const [isLoading, setIsLoading] = useState(!initialJobs);
   const [error, setError] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const isInitialMount = useRef(true);
 
   if (prevSearchParam !== searchParam) {
     setPrevSearchParam(searchParam);
     setSearchInput(searchParam);
   }
 
-  // Fetch saved job IDs for current authenticated user
+  // Sync saved job IDs with Redux store
   useEffect(() => {
     let ignore = false;
     getSavedJobIdsAction().then((res) => {
       if (!ignore && res.success && res.savedJobIds) {
         setSavedJobIds(new Set(res.savedJobIds));
+        dispatch(setReduxSavedJobIds(res.savedJobIds));
       }
     });
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [dispatch]);
 
   const handleToggleSaved = (jobId: string, isSaved: boolean) => {
+    dispatch(toggleReduxSavedJobId({ jobId, isSaved }));
     setSavedJobIds((prev) => {
       const next = new Set(prev);
       if (isSaved) {
@@ -123,6 +151,14 @@ export function JobsExplorer({ userRole: initialUserRole }: JobsExplorerProps = 
   // Fetch jobs from /api/jobs with active URL state
   useEffect(() => {
     let ignore = false;
+
+    // Skip redundant fetch on initial mount when SSR delivered the initial jobs
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      if (initialJobs && initialJobs.length > 0) {
+        return;
+      }
+    }
 
     async function load() {
       try {
@@ -160,6 +196,7 @@ export function JobsExplorer({ userRole: initialUserRole }: JobsExplorerProps = 
           );
           if (json.facets) {
             setFacets(json.facets);
+            dispatch(setReduxFacets(json.facets));
           }
           setError(null);
           setIsLoading(false);

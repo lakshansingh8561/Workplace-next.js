@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, Suspense, useSyncExternalStore } from "react";
+import { useState, useEffect, Suspense, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logoutUser } from "@/lib/actions/auth";
 import { SessionUser } from "@/lib/session";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { Avatar } from "@/components/ui/Avatar";
+import { useAppDispatch } from "@/lib/store";
+import { setCredentials } from "@/lib/store/slices/authSlice";
 
 interface NavbarProps {
   user?: SessionUser | null;
@@ -455,6 +457,27 @@ function MobileNavListStatic({
 export function Navbar({ user }: NavbarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const dispatch = useAppDispatch();
+
+  useEffect(() => {
+    if (user) {
+      dispatch(
+        setCredentials({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image,
+          role: user.role as "CLIENT" | "FREELANCER",
+          roleSelected: user.roleSelected,
+          emailVerified: user.emailVerified
+            ? new Date(user.emailVerified).toISOString()
+            : null,
+        })
+      );
+    } else {
+      dispatch(setCredentials(null));
+    }
+  }, [user, dispatch]);
 
   const closeMenu = () => {
     setIsMobileMenuOpen(false);

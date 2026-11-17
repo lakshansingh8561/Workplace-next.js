@@ -72,6 +72,7 @@ model Job {
   @@index([clientId])
   @@index([category])
   @@index([status])
+  @@index([status, createdAt])
   @@index([type])
   @@index([experienceLevel])
   @@index([createdAt])
@@ -168,6 +169,7 @@ model User {
 
   @@index([role, roleSelected])
   @@index([role, isAvailable])
+  @@index([role, isAvailable, visibility])
   @@index([hourlyRate])
   @@index([createdAt])
   @@map("users")
@@ -335,6 +337,7 @@ model Message {
   updatedAt      DateTime     @updatedAt
 
   @@index([conversationId, createdAt])
+  @@index([conversationId, read])
   @@index([senderId])
   @@map("messages")
 }
@@ -370,6 +373,7 @@ model Notification {
   createdAt DateTime         @default(now())
 
   @@index([userId, read])
+  @@index([userId, read, createdAt])
   @@index([userId, createdAt])
   @@map("notifications")
 }

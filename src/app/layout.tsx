@@ -5,6 +5,7 @@ import "./globals.css";
 import Script from "next/script";
 import { Navbar, Footer } from "@/components";
 import { NavbarServer } from "@/components/layout/NavbarServer";
+import { StoreProvider } from "@/lib/store";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,11 +34,13 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <Suspense fallback={<Navbar user={null} />}>
-          <NavbarServer />
-        </Suspense>
-        <main className="flex-1 flex flex-col">{children}</main>
-        <Footer />
+        <StoreProvider>
+          <Suspense fallback={<Navbar user={null} />}>
+            <NavbarServer />
+          </Suspense>
+          <main className="flex-1 flex flex-col">{children}</main>
+          <Footer />
+        </StoreProvider>
         <Script
           id="razorpay-checkout-sdk"
           src="https://checkout.razorpay.com/v1/checkout.js"

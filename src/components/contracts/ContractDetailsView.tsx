@@ -12,11 +12,42 @@ import {
 import { ContractStatus, MilestoneStatus, PaymentType } from "@prisma/client";
 import { ContractReviewSection } from "@/components/contracts/ContractReviewSection";
 import type { ContractReviewData } from "@/lib/actions/review";
-import { FreelancerTimeTrackerWidget } from "@/components/contracts/FreelancerTimeTrackerWidget";
-import { ClientWorkDiaryView } from "@/components/contracts/ClientWorkDiaryView";
+import dynamic from "next/dynamic";
 import { RazorpayPaymentButton } from "@/components/payments/RazorpayCheckoutButton";
 import { PaymentHistorySection } from "@/components/payments/PaymentHistorySection";
 import { formatDate } from "@/lib/utils";
+
+const FreelancerTimeTrackerWidget = dynamic(
+  () =>
+    import("@/components/contracts/FreelancerTimeTrackerWidget").then(
+      (mod) => mod.FreelancerTimeTrackerWidget
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-3xl border border-zinc-200/90 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90 animate-pulse">
+        <div className="h-6 w-48 bg-zinc-200 dark:bg-zinc-800 rounded mb-4" />
+        <div className="h-10 w-full bg-zinc-100 dark:bg-zinc-800/60 rounded-xl" />
+      </div>
+    ),
+  }
+);
+
+const ClientWorkDiaryView = dynamic(
+  () =>
+    import("@/components/contracts/ClientWorkDiaryView").then(
+      (mod) => mod.ClientWorkDiaryView
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="mt-8 rounded-3xl border border-zinc-200/90 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/90 animate-pulse">
+        <div className="h-6 w-56 bg-zinc-200 dark:bg-zinc-800 rounded mb-4" />
+        <div className="h-24 w-full bg-zinc-100 dark:bg-zinc-800/60 rounded-2xl" />
+      </div>
+    ),
+  }
+);
 
 export interface DetailMilestone {
   id: string;

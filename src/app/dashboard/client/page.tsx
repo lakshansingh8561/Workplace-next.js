@@ -7,6 +7,7 @@ import { Role, JobStatus, Prisma } from "@prisma/client";
 import {
   ClientDashboardView,
   ClientDashboardJob,
+  ClientDashboardFreelancer,
 } from "@/components/dashboard/ClientDashboardView";
 
 export const metadata: Metadata = {
@@ -21,6 +22,31 @@ interface ClientDashboardPageProps {
     page?: string;
     tab?: string;
   }>;
+}
+
+let cachedFreelancers: { data: ClientDashboardFreelancer[]; expiresAt: number } | null = null;
+
+async function getCachedAvailableFreelancers(): Promise<ClientDashboardFreelancer[]> {
+  const now = Date.now();
+  if (cachedFreelancers && cachedFreelancers.expiresAt > now) {
+    return cachedFreelancers.data;
+  }
+  const data = await prisma.user.findMany({
+    where: { role: "FREELANCER", isAvailable: true, visibility: "PUBLIC" },
+    orderBy: { updatedAt: "desc" },
+    take: 4,
+    select: {
+      id: true,
+      name: true,
+      image: true,
+      title: true,
+      skills: true,
+      hourlyRate: true,
+      location: true,
+    },
+  });
+  cachedFreelancers = { data, expiresAt: now + 60_000 };
+  return data;
 }
 
 async function ClientDashboardContent({
@@ -127,20 +153,7 @@ async function ClientDashboardContent({
         },
       },
     }),
-    prisma.user.findMany({
-      where: { role: "FREELANCER", isAvailable: true, visibility: "PUBLIC" },
-      orderBy: { updatedAt: "desc" },
-      take: 4,
-      select: {
-        id: true,
-        name: true,
-        image: true,
-        title: true,
-        skills: true,
-        hourlyRate: true,
-        location: true,
-      },
-    }),
+    getCachedAvailableFreelancers(),
     prisma.hiringOffer.findMany({
       where: { clientId: user.id },
       orderBy: { updatedAt: "desc" },

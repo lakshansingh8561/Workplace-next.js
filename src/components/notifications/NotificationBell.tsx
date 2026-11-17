@@ -1,12 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef, useTransition } from "react";
+import { useState, useEffect, useRef, useTransition, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   getNotificationsAction,
   markNotificationReadAction,
 } from "@/lib/actions/notification";
+import { useAppDispatch, useAppSelector } from "@/lib/store";
+import {
+  setNotifications,
+  markAsRead,
+  markAllAsRead,
+} from "@/lib/store/slices/notificationsSlice";
 
 interface NotificationItem {
   id: string;
@@ -21,15 +27,18 @@ interface NotificationItem {
 
 export function NotificationBell() {
   const router = useRouter();
+  const dispatch = useAppDispatch();
+  const notifications = useAppSelector((state) => state.notifications.items);
+  const unreadCount = useAppSelector((state) => state.notifications.unreadCount);
+  const lastFetchedAt = useAppSelector((state) => state.notifications.lastFetchedAt);
+
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"unread" | "all">("unread");
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [, startTransition] = useTransition();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async (force = false) => {
     // Only poll when the document is currently visible and online
     if (typeof document !== "undefined" && document.visibilityState !== "visible") {
       return;
@@ -38,11 +47,20 @@ export function NotificationBell() {
       return;
     }
 
+    // Skip if fetched very recently unless forced
+    if (!force && lastFetchedAt && Date.now() - lastFetchedAt < 15000) {
+      return;
+    }
+
     try {
       const res = await getNotificationsAction(40);
       if (res?.success && res.notifications) {
-        setNotifications(res.notifications);
-        setUnreadCount(res.unreadCount || 0);
+        dispatch(
+          setNotifications({
+            items: res.notifications,
+            unreadCount: res.unreadCount || 0,
+          })
+        );
       }
     } catch (err) {
       // Gracefully handle network hiccups or page unload interruptions
@@ -51,7 +69,7 @@ export function NotificationBell() {
       }
       console.warn("[WorkPulse Notifications Warning]:", err instanceof Error ? err.message : "Polling interrupted");
     }
-  };
+  }, [dispatch, lastFetchedAt]);
 
   useEffect(() => {
     let ignore = false;
@@ -61,8 +79,12 @@ export function NotificationBell() {
       try {
         const res = await getNotificationsAction(40);
         if (!ignore && res?.success && res.notifications) {
-          setNotifications(res.notifications);
-          setUnreadCount(res.unreadCount || 0);
+          dispatch(
+            setNotifications({
+              items: res.notifications,
+              unreadCount: res.unreadCount || 0,
+            })
+          );
         }
       } catch (err) {
         if (!ignore) {
@@ -76,16 +98,16 @@ export function NotificationBell() {
 
     loadInitial();
 
-    // Sane polling: refresh every 25 seconds when visible
+    // Sane polling: refresh every 30 seconds when visible
     const interval = setInterval(() => {
       fetchNotifications();
-    }, 25000);
+    }, 30000);
 
     return () => {
       ignore = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [dispatch, fetchNotifications]);
 
   // Close dropdown on outside click or escape
   useEffect(() => {
@@ -125,16 +147,15 @@ export function NotificationBell() {
   const handleMarkAllRead = () => {
     startTransition(async () => {
       setIsLoading(true);
-      // Optimistic update immediately
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-      setUnreadCount(0);
+      // Optimistic Redux store update immediately
+      dispatch(markAllAsRead());
 
       try {
         await markNotificationReadAction({ all: true });
       } catch (err) {
         console.error("Failed to mark all as read:", err);
         // Resync from server on failure
-        fetchNotifications();
+        fetchNotifications(true);
       } finally {
         setIsLoading(false);
       }
@@ -150,11 +171,8 @@ export function NotificationBell() {
     }
 
     if (!notification.read) {
-      // Optimistic state update immediately
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n))
-      );
+      // Optimistic Redux store update immediately
+      dispatch(markAsRead(notification.id));
 
       // Persist read status to database
       markNotificationReadAction({ notificationId: notification.id }).catch(

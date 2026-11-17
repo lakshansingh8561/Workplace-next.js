@@ -3,14 +3,40 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { updateProposalStatusAction } from "@/lib/actions/proposal";
 import { getOrCreatePreHireConversationAction } from "@/lib/actions/message";
-import { HireConfirmationModal } from "@/components/dashboard/HireConfirmationModal";
-import { SendInvitationModal } from "@/components/dashboard/SendInvitationModal";
-import { DeclineReasonModal } from "@/components/dashboard/DeclineReasonModal";
-import { NegotiateProposalModal } from "@/components/dashboard/NegotiateProposalModal";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProposalStatus } from "@/types";
+
+const HireConfirmationModal = dynamic(
+  () =>
+    import("@/components/dashboard/HireConfirmationModal").then(
+      (m) => m.HireConfirmationModal
+    ),
+  { ssr: false }
+);
+const SendInvitationModal = dynamic(
+  () =>
+    import("@/components/dashboard/SendInvitationModal").then(
+      (m) => m.SendInvitationModal
+    ),
+  { ssr: false }
+);
+const DeclineReasonModal = dynamic(
+  () =>
+    import("@/components/dashboard/DeclineReasonModal").then(
+      (m) => m.DeclineReasonModal
+    ),
+  { ssr: false }
+);
+const NegotiateProposalModal = dynamic(
+  () =>
+    import("@/components/dashboard/NegotiateProposalModal").then(
+      (m) => m.NegotiateProposalModal
+    ),
+  { ssr: false }
+);
 
 export interface ReviewProposalItem {
   id: string;

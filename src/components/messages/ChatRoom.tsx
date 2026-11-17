@@ -10,6 +10,12 @@ import {
 import { respondToInvitationAction } from "@/lib/actions/invitation";
 import { DeclineReasonModal } from "@/components/dashboard/DeclineReasonModal";
 import { Avatar } from "@/components/ui/Avatar";
+import { useAppDispatch, useAppSelector } from "@/lib/store";
+import {
+  setActiveConversationId,
+  saveDraftMessage,
+  clearDraftMessage,
+} from "@/lib/store/slices/messagingSlice";
 
 interface ChatRoomProps {
   conversationId: string;
@@ -24,6 +30,11 @@ export function ChatRoom({
   onBackToList,
   onMessageSent,
 }: ChatRoomProps) {
+  const dispatch = useAppDispatch();
+  const existingDraft = useAppSelector(
+    (state) => state.messaging.draftMessages[conversationId] || ""
+  );
+
   const [messages, setMessages] = useState<ChatMessageDto[]>([]);
   const [conversation, setConversation] = useState<{
     id: string;
@@ -47,15 +58,23 @@ export function ChatRoom({
     } | null;
   } | null>(null);
 
-  const [inputContent, setInputContent] = useState("");
+  const [inputContent, setInputContent] = useState(existingDraft);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [isSending, startSendTransition] = useTransition();
+  const [isSending, setIsSending] = useState(false);
 
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+
+  // Sync active conversation with Redux store
+  useEffect(() => {
+    dispatch(setActiveConversationId(conversationId));
+    return () => {
+      dispatch(setActiveConversationId(null));
+    };
+  }, [conversationId, dispatch]);
 
   // Decline invitation modal state
   const [isDeclineModalOpen, setIsDeclineModalOpen] = useState(false);
@@ -121,7 +140,8 @@ export function ChatRoom({
     const interval = setInterval(async () => {
       if (document.visibilityState === "visible") {
         try {
-          const res = await getMessagesAction(conversationId, 50);
+          // Optimized polling: fetch only latest 10 messages instead of 50 to minimize DB and payload overhead
+          const res = await getMessagesAction(conversationId, 10);
           if (!ignore && res.success && res.messages) {
             setMessages((prev) => {
               const existingIds = new Set(prev.map((m) => m.id));
@@ -176,7 +196,7 @@ export function ChatRoom({
     if (e) e.preventDefault();
 
     const trimmed = inputContent.trim();
-    if (!trimmed) {
+    if (!trimmed || isSending) {
       return;
     }
 
@@ -186,8 +206,9 @@ export function ChatRoom({
     }
 
     setErrorMessage(null);
+    setIsSending(true);
 
-    startSendTransition(async () => {
+    try {
       const res = await sendMessageAction({
         conversationId,
         content: trimmed,
@@ -195,15 +216,28 @@ export function ChatRoom({
 
       if (res.success && res.message) {
         setInputContent("");
-        setMessages((prev) => [...prev, res.message!]);
+        dispatch(clearDraftMessage(conversationId));
+        setMessages((prev) => {
+          const exists = prev.some((m) => m.id === res.message!.id);
+          return exists ? prev : [...prev, res.message!];
+        });
+        setIsSending(false);
         setTimeout(() => scrollToBottom("smooth"), 50);
         if (onMessageSent) {
-          onMessageSent();
+          try {
+            onMessageSent();
+          } catch {
+            // Non-blocking
+          }
         }
       } else {
+        setIsSending(false);
         setErrorMessage(res.error || "Failed to send message. Please try again.");
       }
-    });
+    } catch {
+      setIsSending(false);
+      setErrorMessage("Failed to send message. Please try again.");
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -721,7 +755,11 @@ export function ChatRoom({
             <textarea
               rows={2}
               value={inputContent}
-              onChange={(e) => setInputContent(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setInputContent(val);
+                dispatch(saveDraftMessage({ conversationId, text: val }));
+              }}
               onKeyDown={handleKeyDown}
               placeholder="Type your message... (Press Enter to send, Shift+Enter for newline)"
               className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50/70 p-3 text-xs text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-white dark:placeholder-zinc-500 transition"
