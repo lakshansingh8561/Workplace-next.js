@@ -48,13 +48,13 @@ export function ConversationList({
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
       if (diffDays === 0) {
-        return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
       } else if (diffDays === 1) {
         return "Yesterday";
       } else if (diffDays < 7) {
-        return date.toLocaleDateString([], { weekday: "short" });
+        return date.toLocaleDateString("en-US", { weekday: "short" });
       }
-      return date.toLocaleDateString([], { month: "short", day: "numeric" });
+      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
     } catch {
       return "";
     }
@@ -206,7 +206,7 @@ export function ConversationList({
                       {c.counterparty.name ||
                         (c.counterparty.role === "CLIENT" ? "Client" : "Freelancer")}
                     </span>
-                    <span className="text-[10px] text-zinc-400 shrink-0 whitespace-nowrap">
+                    <span suppressHydrationWarning className="text-[10px] text-zinc-400 shrink-0 whitespace-nowrap">
                       {formatSnippetTime(c.lastMessageAt)}
                     </span>
                   </div>

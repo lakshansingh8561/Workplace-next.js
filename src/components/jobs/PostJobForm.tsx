@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useId } from "react";
+import { useState, useRef, useId } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createJobAction } from "@/lib/actions/job";
@@ -15,7 +15,10 @@ interface PostJobFormProps {
 
 export function PostJobForm({ userName }: PostJobFormProps) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState<"OPEN" | "DRAFT" | null>(null);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const submittingRef = useRef(false);
 
   // Form Fields
   const [title, setTitle] = useState("");
@@ -59,17 +62,20 @@ export function PostJobForm({ userName }: PostJobFormProps) {
     }
   };
 
-  const handleFormSubmit = (targetStatus: "OPEN" | "DRAFT") => {
-    if (isPending) return;
+  const handleFormSubmit = async (targetStatus: "OPEN" | "DRAFT") => {
+    if (isSubmitting || submittingRef.current) return;
 
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    setSubmittingAction(targetStatus);
     setError(null);
     setFieldErrors({});
 
-    startTransition(async () => {
+    try {
       const payload = {
-        title,
+        title: title.trim(),
         category,
-        description,
+        description: description.trim(),
         skills,
         type,
         budget: type === "FIXED" ? (budget === "" ? null : Number(budget)) : null,
@@ -87,15 +93,42 @@ export function PostJobForm({ userName }: PostJobFormProps) {
         if (result.fieldErrors) {
           setFieldErrors(result.fieldErrors);
         }
-      } else if (result.jobId) {
-        if (targetStatus === "DRAFT") {
-          router.push("/dashboard/client?status=DRAFT");
-        } else {
-          router.push("/dashboard/client");
-        }
-        router.refresh();
+        setIsSubmitting(false);
+        setSubmittingAction(null);
+        submittingRef.current = false;
+        return;
       }
-    });
+
+      if (result.jobId) {
+        setIsSuccess(true);
+        const destination =
+          targetStatus === "DRAFT"
+            ? "/dashboard/client?status=DRAFT"
+            : "/dashboard/client";
+
+        // Native browser navigation guarantees immediate redirect to the dashboard,
+        // avoiding Next.js client-side router transition queue delays or dev stalls.
+        if (typeof window !== "undefined") {
+          window.location.href = destination;
+        } else {
+          router.push(destination);
+        }
+      } else {
+        setIsSubmitting(false);
+        setSubmittingAction(null);
+        submittingRef.current = false;
+      }
+    } catch (err) {
+      console.error("[PostJobForm submission error]:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "An unexpected error occurred while publishing. Please try again."
+      );
+      setIsSubmitting(false);
+      setSubmittingAction(null);
+      submittingRef.current = false;
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -124,6 +157,16 @@ export function PostJobForm({ userName }: PostJobFormProps) {
             className="mb-6 rounded-xl bg-red-50 p-4 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200 dark:border-red-900/50"
           >
             {error}
+          </div>
+        )}
+
+        {isSuccess && (
+          <div
+            role="status"
+            className="mb-6 rounded-xl bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/50 flex items-center gap-2"
+          >
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+            Job posted successfully! Redirecting to your dashboard...
           </div>
         )}
 
@@ -446,26 +489,36 @@ export function PostJobForm({ userName }: PostJobFormProps) {
           <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end gap-3">
             <Link
               href="/jobs"
-              className="rounded-xl px-5 py-2.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 transition-colors"
+              className={`rounded-xl px-5 py-2.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 transition-colors ${
+                isSubmitting || isSuccess ? "pointer-events-none opacity-50" : ""
+              }`}
             >
               Cancel
             </Link>
 
             <button
               type="button"
-              disabled={isPending}
+              disabled={isSubmitting || isSuccess}
               onClick={() => handleFormSubmit("DRAFT")}
               className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-2.5 text-xs font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 transition active:scale-95 disabled:opacity-60"
             >
-              Save as Draft
+              {isSuccess && submittingAction === "DRAFT"
+                ? "Saved! Redirecting..."
+                : isSubmitting && submittingAction === "DRAFT"
+                ? "Saving Draft..."
+                : "Save as Draft"}
             </button>
 
             <button
               type="submit"
-              disabled={isPending}
+              disabled={isSubmitting || isSuccess}
               className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 active:scale-95 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
             >
-              {isPending ? "Publishing Job..." : "Publish Job Post"}
+              {isSuccess && submittingAction === "OPEN"
+                ? "Job Published! Redirecting..."
+                : isSubmitting && submittingAction === "OPEN"
+                ? "Publishing Job..."
+                : "Publish Job Post"}
             </button>
           </div>
         </form>

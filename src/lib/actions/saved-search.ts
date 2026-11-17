@@ -291,7 +291,7 @@ export async function matchJobAlertsForPublishedJob(job: {
     }
 
     // Find freelancers who have saved searches
-    const freelancers = await prisma.user.findMany({
+    const freelancers = (await prisma.user.findMany({
       where: {
         role: "FREELANCER",
         roleSelected: true,
@@ -302,7 +302,7 @@ export async function matchJobAlertsForPublishedJob(job: {
         savedSearches: true,
       },
       take: 100, // Batch limit to preserve DB performance
-    });
+    })) || [];
 
     let alertsDispatched = 0;
 

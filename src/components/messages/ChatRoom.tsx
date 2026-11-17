@@ -311,7 +311,7 @@ export function ChatRoom({
   const formatMessageTime = (dateStr: string) => {
     try {
       const date = new Date(dateStr);
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
     } catch {
       return "";
     }
@@ -320,7 +320,7 @@ export function ChatRoom({
   const formatMessageDate = (dateStr: string) => {
     try {
       const date = new Date(dateStr);
-      return date.toLocaleDateString([], {
+      return date.toLocaleDateString("en-US", {
         weekday: "short",
         month: "short",
         day: "numeric",
@@ -623,13 +623,13 @@ export function ChatRoom({
                   <div key={m.id} className="space-y-2">
                     {showDateHeader && (
                       <div className="flex items-center justify-center my-3">
-                        <span className="px-2.5 py-0.5 rounded-full bg-zinc-200/80 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                        <span suppressHydrationWarning className="px-2.5 py-0.5 rounded-full bg-zinc-200/80 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                           {formatMessageDate(m.createdAt)}
                         </span>
                       </div>
                     )}
                     <div className="flex justify-center my-2">
-                      <div className="rounded-xl bg-zinc-100 px-3.5 py-1 text-center text-[11px] font-medium text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 max-w-md">
+                      <div suppressHydrationWarning className="rounded-xl bg-zinc-100 px-3.5 py-1 text-center text-[11px] font-medium text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 max-w-md">
                         {m.content} • {formatMessageTime(m.createdAt)}
                       </div>
                     </div>
@@ -641,7 +641,7 @@ export function ChatRoom({
                 <div key={m.id} className="space-y-2">
                   {showDateHeader && (
                     <div className="flex items-center justify-center my-3">
-                      <span className="px-2.5 py-0.5 rounded-full bg-zinc-200/80 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                      <span suppressHydrationWarning className="px-2.5 py-0.5 rounded-full bg-zinc-200/80 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                         {formatMessageDate(m.createdAt)}
                       </span>
                     </div>
@@ -655,7 +655,7 @@ export function ChatRoom({
                           : m.sender.name ||
                             (m.sender.role === "CLIENT" ? "Client" : "Freelancer")}
                       </span>
-                      <span className="text-[10px] text-zinc-400">
+                      <span suppressHydrationWarning className="text-[10px] text-zinc-400">
                         {formatMessageTime(m.createdAt)}
                       </span>
                     </div>
