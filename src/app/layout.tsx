@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Script from "next/script";
-import { Navbar, Footer } from "@/components";
+import { Navbar, NavbarSkeleton, Footer } from "@/components";
 import { NavbarServer } from "@/components/layout/NavbarServer";
 import { StoreProvider } from "@/lib/store";
 
@@ -35,7 +35,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <StoreProvider>
-          <Suspense fallback={<Navbar user={null} />}>
+          <Suspense fallback={<NavbarSkeleton />}>
             <NavbarServer />
           </Suspense>
           <main className="flex-1 flex flex-col">{children}</main>

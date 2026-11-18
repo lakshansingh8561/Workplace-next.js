@@ -1,4 +1,5 @@
 export { Navbar } from "./layout/Navbar";
+export { NavbarSkeleton } from "./layout/NavbarSkeleton";
 export { Footer } from "./layout/Footer";
 export { Badge } from "./ui/Badge";
 export { HeroVideo } from "./home/HeroVideo";

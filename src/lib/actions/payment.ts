@@ -25,6 +25,8 @@ import {
   getRazorpayClient,
   getRazorpayCredentials,
   verifyRazorpaySignature,
+  ensurePaymentCollectionIndexes,
+  handlePaymentGatewayError,
 } from "@/lib/razorpay";
 
 export type PaymentOrderResult = {
@@ -92,6 +94,10 @@ export async function createMilestonePaymentOrderAction(
   }
   const user = authRes.user;
 
+  let amount = 0;
+  let amountSubunits = 0;
+  let currency = "USD";
+
   try {
     const milestone = await prisma.contractMilestone.findUnique({
       where: { id: milestoneId },
@@ -141,20 +147,23 @@ export async function createMilestonePaymentOrderAction(
       };
     }
 
-    const { keyId, currency, isConfigured, isTestMode } = getRazorpayCredentials();
-    if (!isConfigured) {
+    const creds = getRazorpayCredentials();
+    currency = creds.currency;
+    if (!creds.isConfigured) {
       return {
         success: false,
-        error: "Razorpay payment gateway is not configured. Please check your credentials in .env.",
+        error: "Payment service is temporarily unavailable. Please contact support.",
       };
     }
 
-    const amount = milestone.amount;
+    await ensurePaymentCollectionIndexes();
+
+    amount = milestone.amount;
     if (amount <= 0) {
       return { success: false, error: "Milestone payment amount must be greater than zero." };
     }
 
-    const amountSubunits = Math.round(amount * 100);
+    amountSubunits = Math.round(amount * 100);
     const minSubunits = currency === "INR" ? 100 : 50;
     if (amountSubunits < minSubunits) {
       const minDisplay = currency === "INR" ? "₹1.00" : `${currency} ${(minSubunits / 100).toFixed(2)}`;
@@ -182,10 +191,10 @@ export async function createMilestonePaymentOrderAction(
         amount: existingPending.amount,
         amountSubunits: existingPending.amountSubunits,
         currency: existingPending.currency,
-        keyId,
+        keyId: creds.keyId,
         title: `Milestone: ${milestone.title}`,
         itemType: PaymentItemType.MILESTONE,
-        isTestMode,
+        isTestMode: creds.isTestMode,
       };
     }
 
@@ -239,19 +248,23 @@ export async function createMilestonePaymentOrderAction(
       amount,
       amountSubunits,
       currency,
-      keyId,
+      keyId: creds.keyId,
       title: `Milestone: ${milestone.title}`,
       itemType: PaymentItemType.MILESTONE,
-      isTestMode,
+      isTestMode: creds.isTestMode,
     };
   } catch (error) {
-    console.error(
-      "[WorkPulse Create Milestone Payment Order Error]:",
-      error instanceof Error ? error.message : "Gateway error"
-    );
+    const errorDetails = handlePaymentGatewayError(error, {
+      operation: "createMilestonePaymentOrder",
+      contractId,
+      milestoneId,
+      amount,
+      amountSubunits,
+      currency,
+    });
     return {
       success: false,
-      error: "Failed to create Razorpay payment order. Please verify credentials.",
+      error: errorDetails.userMessage,
     };
   }
 }
@@ -283,6 +296,10 @@ export async function createTimesheetPaymentOrderAction(
     return { success: false, error: authRes.error };
   }
   const user = authRes.user;
+
+  let totalAmount = 0;
+  let amountSubunits = 0;
+  let currency = "USD";
 
   try {
     const contract = await prisma.contract.findUnique({
@@ -368,7 +385,7 @@ export async function createTimesheetPaymentOrderAction(
     }
 
     // Strictly calculate total amount from server-side stored snapshots
-    const totalAmount = Number(
+    totalAmount = Number(
       entries.reduce((sum, e) => sum + (e.billableAmount || 0), 0).toFixed(2)
     );
 
@@ -379,15 +396,18 @@ export async function createTimesheetPaymentOrderAction(
       };
     }
 
-    const { keyId, currency, isConfigured, isTestMode } = getRazorpayCredentials();
-    if (!isConfigured) {
+    const creds = getRazorpayCredentials();
+    currency = creds.currency;
+    if (!creds.isConfigured) {
       return {
         success: false,
-        error: "Razorpay payment gateway is not configured. Please check your credentials in .env.",
+        error: "Payment service is temporarily unavailable. Please contact support.",
       };
     }
 
-    const amountSubunits = Math.round(totalAmount * 100);
+    await ensurePaymentCollectionIndexes();
+
+    amountSubunits = Math.round(totalAmount * 100);
     const minSubunits = currency === "INR" ? 100 : 50;
     if (amountSubunits < minSubunits) {
       const minDisplay = currency === "INR" ? "₹1.00" : `${currency} ${(minSubunits / 100).toFixed(2)}`;
@@ -447,20 +467,23 @@ export async function createTimesheetPaymentOrderAction(
       amount: totalAmount,
       amountSubunits,
       currency,
-      keyId,
+      keyId: creds.keyId,
       title: `${entries.length} Approved Work Sessions`,
       itemType: PaymentItemType.HOURLY_TIMESHEET,
-      isTestMode,
+      isTestMode: creds.isTestMode,
     };
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : "Gateway error";
-    console.error(
-      "[WorkPulse Create Timesheet Payment Order Error]:",
-      errorMsg
-    );
+    const errorDetails = handlePaymentGatewayError(error, {
+      operation: "createTimesheetPaymentOrder",
+      contractId,
+      timeEntryIds,
+      amount: totalAmount,
+      amountSubunits,
+      currency,
+    });
     return {
       success: false,
-      error: `Failed to create Razorpay timesheet payment order: ${errorMsg}`,
+      error: errorDetails.userMessage,
     };
   }
 }

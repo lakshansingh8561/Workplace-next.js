@@ -23,7 +23,7 @@ import {
 import {
   setMobileFiltersOpen as setReduxMobileFiltersOpen,
 } from "@/lib/store/slices/uiSlice";
-import { subscribeToJobStatusChanges } from "@/lib/events/job-events";
+import { subscribeToMarketplaceEvents } from "@/lib/events/job-events";
 
 export interface JobsExplorerProps {
   userRole?: string | null;
@@ -62,15 +62,23 @@ export function JobsExplorer({
     }
   }, [initialUserRole, reduxUser?.role]);
 
-  // Real-time cross-dashboard synchronization when a client pauses, reopens, or closes a job
+  // Real-time cross-dashboard synchronization when a client creates, pauses, reopens, or closes a job
   useEffect(() => {
-    const unsubscribe = subscribeToJobStatusChanges((evt) => {
-      if (evt.status !== "OPEN") {
-        setJobs((prev) => prev.filter((j) => j.id !== evt.jobId));
+    const unsubscribe = subscribeToMarketplaceEvents((evt) => {
+      if (evt.type === "JOB_STATUS") {
+        if (evt.status !== "OPEN") {
+          setJobs((prev) => prev.filter((j) => j.id !== evt.jobId));
+        }
+        setRefreshCount((c) => c + 1);
+        startTransition(() => {
+          router.refresh();
+        });
+      } else if (evt.type === "JOB_CREATED") {
+        setRefreshCount((c) => c + 1);
+        startTransition(() => {
+          router.refresh();
+        });
       }
-      startTransition(() => {
-        router.refresh();
-      });
     });
     return unsubscribe;
   }, [router]);

@@ -226,6 +226,7 @@ export function JobDetailsView({
     });
     setShowApplyModal(false);
     setSuccessBanner("Your proposal was successfully submitted! The client will review your application.");
+    router.refresh();
   };
 
   return (

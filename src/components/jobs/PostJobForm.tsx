@@ -4,6 +4,7 @@ import { useState, useRef, useId } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createJobAction } from "@/lib/actions/job";
+import { broadcastJobCreated } from "@/lib/events/job-events";
 import {
   SUPPORTED_CATEGORIES,
   DURATION_OPTIONS,
@@ -106,13 +107,12 @@ export function PostJobForm({ userName }: PostJobFormProps) {
             ? "/dashboard/client?status=DRAFT"
             : "/dashboard/client";
 
-        // Native browser navigation guarantees immediate redirect to the dashboard,
-        // avoiding Next.js client-side router transition queue delays or dev stalls.
-        if (typeof window !== "undefined") {
-          window.location.href = destination;
-        } else {
-          router.push(destination);
-        }
+        // Notify other components and tabs of newly published/saved job
+        broadcastJobCreated(result.jobId, targetStatus, payload.title);
+
+        // Client-side router navigation prevents full window reload, avoiding auth flickering
+        router.push(destination);
+        router.refresh();
       } else {
         setIsSubmitting(false);
         setSubmittingAction(null);

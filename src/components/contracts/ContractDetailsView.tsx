@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -9,6 +9,11 @@ import {
   approveMilestoneAction,
   updateContractStatusAction,
 } from "@/lib/actions/contract";
+import {
+  broadcastMilestoneUpdate,
+  broadcastMarketplaceEvent,
+  subscribeToMarketplaceEvents,
+} from "@/lib/events/job-events";
 import { ContractStatus, MilestoneStatus, PaymentType } from "@prisma/client";
 import { ContractReviewSection } from "@/components/contracts/ContractReviewSection";
 import type { ContractReviewData } from "@/lib/actions/review";
@@ -124,6 +129,26 @@ export function ContractDetailsView({
   const [paymentRefreshTrigger, setPaymentRefreshTrigger] = useState(0);
   const [isPending, startTransition] = useTransition();
 
+  // Sync state whenever server revalidates or sends fresh contract props
+  useEffect(() => {
+    setContract(initialContract);
+  }, [initialContract]);
+
+  // Subscribe to real-time milestone and contract status events across tabs
+  useEffect(() => {
+    const unsubscribe = subscribeToMarketplaceEvents((event) => {
+      if (
+        (event.type === "MILESTONE_STATUS" && event.contractId === contract.id) ||
+        (event.type === "CONTRACT_STATUS" && event.contractId === contract.id)
+      ) {
+        startTransition(() => {
+          router.refresh();
+        });
+      }
+    });
+    return unsubscribe;
+  }, [contract.id, router]);
+
   const isClient = currentUserRole === "CLIENT" && contract.clientId === currentUserId;
   const isFreelancer =
     currentUserRole === "FREELANCER" && contract.freelancerId === currentUserId;
@@ -216,6 +241,7 @@ export function ContractDetailsView({
         ),
       }));
       setActiveActionId(null);
+      broadcastMilestoneUpdate(milestoneId, contract.id, "SUBMITTED");
       router.refresh();
     });
   };
@@ -240,6 +266,7 @@ export function ContractDetailsView({
         ),
       }));
       setActiveActionId(null);
+      broadcastMilestoneUpdate(milestoneId, contract.id, "APPROVED");
       router.refresh();
     });
   };
@@ -265,6 +292,11 @@ export function ContractDetailsView({
         status: newStatus,
       }));
       setActiveActionId(null);
+      broadcastMarketplaceEvent({
+        type: "CONTRACT_STATUS",
+        contractId: contract.id,
+        status: newStatus,
+      });
       router.refresh();
     });
   };
@@ -827,6 +859,7 @@ export function ContractDetailsView({
           milestone={submittingMilestone}
           contractTitle={contract.title}
           onSuccess={() => {
+            broadcastMilestoneUpdate(submittingMilestone.id, contract.id, "SUBMITTED");
             router.refresh();
           }}
         />
@@ -840,6 +873,7 @@ export function ContractDetailsView({
           milestoneId={requestingChangesMilestone.id}
           milestoneTitle={requestingChangesMilestone.title}
           onSuccess={() => {
+            broadcastMilestoneUpdate(requestingChangesMilestone.id, contract.id, "ACTIVE");
             router.refresh();
           }}
         />

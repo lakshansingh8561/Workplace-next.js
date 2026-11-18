@@ -478,10 +478,25 @@ export function Navbar({ user }: NavbarProps) {
   const dispatch = useAppDispatch();
   const reduxUser = useAppSelector((state) => state.auth.user);
 
+  // Fallback to persisted Redux session if user prop is transiently undefined/null during SSR transitions
+  const effectiveUser: SessionUser | null =
+    user ??
+    (reduxUser
+      ? ({
+          id: reduxUser.id,
+          name: reduxUser.name ?? null,
+          email: reduxUser.email ?? "",
+          image: reduxUser.image ?? null,
+          role: (reduxUser.role as "CLIENT" | "FREELANCER") ?? "CLIENT",
+          roleSelected: Boolean(reduxUser.roleSelected),
+          emailVerified: reduxUser.emailVerified ? new Date(reduxUser.emailVerified) : null,
+        } as SessionUser)
+      : null);
+
   const currentImage =
-    reduxUser?.id === user?.id && reduxUser?.image !== undefined
+    reduxUser?.id === effectiveUser?.id && reduxUser?.image !== undefined
       ? reduxUser.image
-      : user?.image;
+      : effectiveUser?.image;
 
   const handleRouteChange = useCallback(() => {
     setIsMobileMenuOpen(false);
@@ -531,9 +546,8 @@ export function Navbar({ user }: NavbarProps) {
             : null,
         })
       );
-    } else {
-      dispatch(setCredentials(null));
     }
+    // Note: Never wipe Redux credentials on transient null props; only handleSignOut explicitly resets.
   }, [user, dispatch]);
 
   const closeMenu = () => {
@@ -546,6 +560,7 @@ export function Navbar({ user }: NavbarProps) {
 
   const handleSignOut = async () => {
     closeMenu();
+    dispatch(setCredentials(null));
     await logoutUser();
   };
 
@@ -575,8 +590,8 @@ export function Navbar({ user }: NavbarProps) {
             aria-label="Main Navigation"
             className="hidden lg:flex items-center gap-2.5 xl:gap-4 2xl:gap-5 text-sm font-medium"
           >
-            <Suspense fallback={<DesktopNavListStatic user={user} />}>
-              <DesktopNavLinks user={user} />
+            <Suspense fallback={<DesktopNavListStatic user={effectiveUser} />}>
+              <DesktopNavLinks user={effectiveUser} />
             </Suspense>
           </nav>
         </div>
@@ -605,9 +620,9 @@ export function Navbar({ user }: NavbarProps) {
             <span>Search</span>
           </Link>
 
-          {user && <NotificationBell />}
+          {effectiveUser && <NotificationBell />}
 
-          {user ? (
+          {effectiveUser ? (
             /* Authenticated User Menu */
             <div ref={userMenuRef} className="relative shrink-0">
               <button
@@ -619,14 +634,14 @@ export function Navbar({ user }: NavbarProps) {
               >
                 <Avatar
                   src={currentImage}
-                  name={user.name || user.email}
-                  role={user.role as "CLIENT" | "FREELANCER"}
-                  userId={user.id}
+                  name={effectiveUser.name || effectiveUser.email}
+                  role={effectiveUser.role as "CLIENT" | "FREELANCER"}
+                  userId={effectiveUser.id}
                   size="xs"
                 />
-                <span className="max-w-[80px] sm:max-w-[100px] md:max-w-[130px] truncate">{user.name || user.email}</span>
+                <span className="max-w-[80px] sm:max-w-[100px] md:max-w-[130px] truncate">{effectiveUser.name || effectiveUser.email}</span>
                 <span className="hidden md:inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0">
-                  {user.role === "CLIENT" ? "Client" : "Freelancer"}
+                  {effectiveUser.role === "CLIENT" ? "Client" : "Freelancer"}
                 </span>
               </button>
 
@@ -638,24 +653,24 @@ export function Navbar({ user }: NavbarProps) {
                   <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 shrink-0 flex items-center gap-2.5">
                     <Avatar
                       src={currentImage}
-                      name={user.name || user.email}
-                      role={user.role as "CLIENT" | "FREELANCER"}
-                      userId={user.id}
+                      name={effectiveUser.name || effectiveUser.email}
+                      role={effectiveUser.role as "CLIENT" | "FREELANCER"}
+                      userId={effectiveUser.id}
                       size="sm"
                     />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">
-                        {user.name || "WorkPulse User"}
+                        {effectiveUser.name || "WorkPulse User"}
                       </p>
-                      <p className="text-[11px] text-zinc-500 truncate">{user.email}</p>
+                      <p className="text-[11px] text-zinc-500 truncate">{effectiveUser.email}</p>
                       <span className="mt-0.5 inline-block text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">
-                        Role: {user.role}
+                        Role: {effectiveUser.role}
                       </span>
                     </div>
                   </div>
 
                   <div className="py-1 border-b border-zinc-100 dark:border-zinc-800 overflow-y-auto overscroll-contain flex-1 max-h-[60vh] space-y-0.5">
-                    {user.role === "CLIENT" ? (
+                    {effectiveUser.role === "CLIENT" ? (
                       <>
                         <Link
                           href="/freelancers"
@@ -801,7 +816,7 @@ export function Navbar({ user }: NavbarProps) {
                           <span>Profile Settings</span>
                         </Link>
                         <Link
-                          href={`/freelancers/${user.id}`}
+                          href={`/freelancers/${effectiveUser.id}`}
                           prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
@@ -845,7 +860,7 @@ export function Navbar({ user }: NavbarProps) {
             </div>
           )}
 
-          {(!user || user.role === "CLIENT") ? (
+          {(!effectiveUser || effectiveUser.role === "CLIENT") ? (
             <Link
               href="/jobs/new"
               className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-500 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 whitespace-nowrap shrink-0"
@@ -864,9 +879,9 @@ export function Navbar({ user }: NavbarProps) {
 
         {/* Mobile Header Controls (< sm) */}
         <div className="flex sm:hidden items-center gap-2 shrink-0">
-          {user && <NotificationBell />}
+          {effectiveUser && <NotificationBell />}
 
-          {!user && (
+          {!effectiveUser && (
             <Link
               href="/login"
               className="text-xs font-semibold text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white px-2 py-1.5 transition-colors whitespace-nowrap"
@@ -875,7 +890,7 @@ export function Navbar({ user }: NavbarProps) {
             </Link>
           )}
 
-          {(!user || user.role === "CLIENT") ? (
+          {(!effectiveUser || effectiveUser.role === "CLIENT") ? (
             <Link
               href="/jobs/new"
               className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-emerald-500 active:scale-95 whitespace-nowrap shrink-0"
@@ -920,37 +935,37 @@ export function Navbar({ user }: NavbarProps) {
       {isMobileMenuOpen && (
         <div className="sm:hidden border-b border-zinc-200 bg-white px-4 pt-3 pb-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
           <nav aria-label="Mobile Navigation" className="flex flex-col space-y-3">
-            {user && (
+            {effectiveUser && (
               <div className="pb-3 border-b border-zinc-100 dark:border-zinc-800 px-1 flex items-center justify-between">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <Avatar
                     src={currentImage}
-                    name={user.name || user.email}
-                    role={user.role as "CLIENT" | "FREELANCER"}
-                    userId={user.id}
+                    name={effectiveUser.name || effectiveUser.email}
+                    role={effectiveUser.role as "CLIENT" | "FREELANCER"}
+                    userId={effectiveUser.id}
                     size="sm"
                   />
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-zinc-900 dark:text-white truncate">
-                      {user.name || user.email}
+                      {effectiveUser.name || effectiveUser.email}
                     </p>
                     <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                      {user.role === "CLIENT" ? "Client" : "Freelancer"}
+                      {effectiveUser.role === "CLIENT" ? "Client" : "Freelancer"}
                     </span>
                   </div>
                 </div>
                 <Link
-                  href={user.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"}
+                  href={effectiveUser.role === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer/proposals"}
                   onClick={closeMenu}
                   className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 shrink-0"
                 >
-                  {user.role === "CLIENT" ? "Dashboard →" : "Proposals →"}
+                  {effectiveUser.role === "CLIENT" ? "Dashboard →" : "Proposals →"}
                 </Link>
               </div>
             )}
 
             {/* Mobile Action Banner inside drawer */}
-            {(!user || user.role === "CLIENT") ? (
+            {(!effectiveUser || effectiveUser.role === "CLIENT") ? (
               <Link
                 href="/jobs/new"
                 onClick={closeMenu}
@@ -970,13 +985,13 @@ export function Navbar({ user }: NavbarProps) {
               </Link>
             )}
 
-            <Suspense fallback={<MobileNavListStatic user={user} closeMenu={closeMenu} />}>
-              <MobileNavLinks user={user} closeMenu={closeMenu} />
+            <Suspense fallback={<MobileNavListStatic user={effectiveUser} closeMenu={closeMenu} />}>
+              <MobileNavLinks user={effectiveUser} closeMenu={closeMenu} />
             </Suspense>
           </nav>
 
           <div className="mt-5 pt-4 border-t border-zinc-100 dark:border-zinc-800 flex flex-col gap-2.5">
-            {user ? (
+            {effectiveUser ? (
               <button
                 type="button"
                 onClick={handleSignOut}

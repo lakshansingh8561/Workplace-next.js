@@ -10,7 +10,7 @@ import {
 import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
 import { Avatar } from "@/components/ui/Avatar";
 import { formatDate } from "@/lib/utils";
-import { subscribeToJobStatusChanges } from "@/lib/events/job-events";
+import { subscribeToMarketplaceEvents } from "@/lib/events/job-events";
 
 interface FreelancerProposalsViewProps {
   proposals: FreelancerProposalItem[];
@@ -49,8 +49,15 @@ export function FreelancerProposalsView({
   }, [searchQuery]);
 
   useEffect(() => {
-    const unsubscribe = subscribeToJobStatusChanges(() => {
-      router.refresh();
+    const unsubscribe = subscribeToMarketplaceEvents((event) => {
+      if (
+        event.type === "PROPOSAL_STATUS" ||
+        event.type === "JOB_STATUS" ||
+        event.type === "JOB_CREATED" ||
+        event.type === "CONTRACT_STATUS"
+      ) {
+        router.refresh();
+      }
     });
     return unsubscribe;
   }, [router]);

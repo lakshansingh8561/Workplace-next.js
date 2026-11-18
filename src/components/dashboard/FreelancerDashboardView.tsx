@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProposalStatus } from "@/types";
 import { formatDate } from "@/lib/utils";
-import { subscribeToJobStatusChanges } from "@/lib/events/job-events";
+import { subscribeToMarketplaceEvents } from "@/lib/events/job-events";
 
 export interface FreelancerDashboardProposal {
   id: string;
@@ -50,8 +50,15 @@ export function FreelancerDashboardView({
   const [searchTerm, setSearchTerm] = useState(searchQuery);
 
   useEffect(() => {
-    const unsubscribe = subscribeToJobStatusChanges(() => {
-      router.refresh();
+    const unsubscribe = subscribeToMarketplaceEvents((event) => {
+      if (
+        event.type === "PROPOSAL_STATUS" ||
+        event.type === "JOB_STATUS" ||
+        event.type === "JOB_CREATED" ||
+        event.type === "CONTRACT_STATUS"
+      ) {
+        router.refresh();
+      }
     });
     return unsubscribe;
   }, [router]);

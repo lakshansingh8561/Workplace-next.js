@@ -4,21 +4,42 @@ export type JobStatusChangeEvent = {
   timestamp: number;
 };
 
-const CHANNEL_NAME = "workpulse_job_status_sync";
+export type MarketplaceEventType =
+  | "JOB_STATUS"
+  | "JOB_CREATED"
+  | "PROPOSAL_STATUS"
+  | "MILESTONE_STATUS"
+  | "CONTRACT_STATUS";
+
+export type MarketplaceEvent = {
+  type: MarketplaceEventType;
+  jobId?: string;
+  proposalId?: string;
+  contractId?: string;
+  milestoneId?: string;
+  status?: string;
+  title?: string;
+  timestamp: number;
+};
+
+const CHANNEL_NAME = "workpulse_marketplace_sync";
+const STORAGE_KEY = "workpulse:marketplace_event";
+const CUSTOM_EVENT_NAME = "workpulse:marketplace_event";
+
+// Backwards-compatible constants for job status
+const LEGACY_STORAGE_KEY = "workpulse:job_status_update";
+const LEGACY_CUSTOM_EVENT = "workpulse:job_status_update";
 
 /**
- * Broadcasts a job status update across browser tabs and same-window components.
- * Uses BroadcastChannel with fallback to localStorage storage events and CustomEvent.
+ * Broadcasts any marketplace event across browser tabs, windows, and components.
  */
-export function broadcastJobStatusChange(
-  jobId: string,
-  status: "OPEN" | "PAUSED" | "CLOSED" | "DRAFT"
+export function broadcastMarketplaceEvent(
+  event: Omit<MarketplaceEvent, "timestamp">
 ) {
   if (typeof window === "undefined") return;
 
-  const payload: JobStatusChangeEvent = {
-    jobId,
-    status,
+  const payload: MarketplaceEvent = {
+    ...event,
     timestamp: Date.now(),
   };
 
@@ -33,25 +54,101 @@ export function broadcastJobStatusChange(
   }
 
   try {
-    localStorage.setItem(
-      "workpulse:job_status_update",
-      JSON.stringify(payload)
-    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
     // Ignore storage quota errors
   }
 
   window.dispatchEvent(
-    new CustomEvent("workpulse:job_status_update", { detail: payload })
+    new CustomEvent(CUSTOM_EVENT_NAME, { detail: payload })
   );
+
+  // If this is a job status update, also emit legacy format for backwards compatibility
+  if (payload.type === "JOB_STATUS" && payload.jobId && payload.status) {
+    const legacyPayload: JobStatusChangeEvent = {
+      jobId: payload.jobId,
+      status: payload.status as "OPEN" | "PAUSED" | "CLOSED" | "DRAFT",
+      timestamp: payload.timestamp,
+    };
+
+    try {
+      localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(legacyPayload));
+    } catch {}
+
+    window.dispatchEvent(
+      new CustomEvent(LEGACY_CUSTOM_EVENT, { detail: legacyPayload })
+    );
+  }
 }
 
 /**
- * Subscribes to cross-tab and cross-dashboard job status update notifications.
- * Automatically cleans up channel, storage, and custom event listeners.
+ * Broadcasts a job status update across browser tabs and same-window components.
+ * Backwards compatible helper.
  */
-export function subscribeToJobStatusChanges(
-  callback: (event: JobStatusChangeEvent) => void
+export function broadcastJobStatusChange(
+  jobId: string,
+  status: "OPEN" | "PAUSED" | "CLOSED" | "DRAFT"
+) {
+  broadcastMarketplaceEvent({
+    type: "JOB_STATUS",
+    jobId,
+    status,
+  });
+}
+
+/**
+ * Broadcasts a newly created job.
+ */
+export function broadcastJobCreated(
+  jobId: string,
+  status: string = "OPEN",
+  title?: string
+) {
+  broadcastMarketplaceEvent({
+    type: "JOB_CREATED",
+    jobId,
+    status,
+    title,
+  });
+}
+
+/**
+ * Broadcasts a proposal status update (submitted, accepted, rejected).
+ */
+export function broadcastProposalUpdate(
+  proposalId: string,
+  status?: string,
+  jobId?: string
+) {
+  broadcastMarketplaceEvent({
+    type: "PROPOSAL_STATUS",
+    proposalId,
+    status,
+    jobId,
+  });
+}
+
+/**
+ * Broadcasts milestone deliverable, revision, or approval updates.
+ */
+export function broadcastMilestoneUpdate(
+  milestoneId: string,
+  contractId?: string,
+  status?: string
+) {
+  broadcastMarketplaceEvent({
+    type: "MILESTONE_STATUS",
+    milestoneId,
+    contractId,
+    status,
+  });
+}
+
+/**
+ * Subscribes to all marketplace events across tabs and local windows.
+ */
+export function subscribeToMarketplaceEvents(
+  callback: (event: MarketplaceEvent) => void
 ): () => void {
   if (typeof window === "undefined") return () => {};
 
@@ -60,7 +157,7 @@ export function subscribeToJobStatusChanges(
     if ("BroadcastChannel" in window) {
       channel = new BroadcastChannel(CHANNEL_NAME);
       channel.onmessage = (e) => {
-        if (e.data && e.data.jobId && e.data.status) {
+        if (e.data && e.data.type) {
           callback(e.data);
         }
       };
@@ -70,10 +167,10 @@ export function subscribeToJobStatusChanges(
   }
 
   const handleStorage = (e: StorageEvent) => {
-    if (e.key === "workpulse:job_status_update" && e.newValue) {
+    if (e.key === STORAGE_KEY && e.newValue) {
       try {
         const parsed = JSON.parse(e.newValue);
-        if (parsed?.jobId && parsed?.status) {
+        if (parsed?.type) {
           callback(parsed);
         }
       } catch {
@@ -83,21 +180,37 @@ export function subscribeToJobStatusChanges(
   };
 
   const handleCustom = (e: Event) => {
-    const customEvt = e as CustomEvent<JobStatusChangeEvent>;
+    const customEvt = e as CustomEvent<MarketplaceEvent>;
     if (customEvt.detail) {
       callback(customEvt.detail);
     }
   };
 
   window.addEventListener("storage", handleStorage);
-  window.addEventListener("workpulse:job_status_update", handleCustom);
+  window.addEventListener(CUSTOM_EVENT_NAME, handleCustom);
 
   return () => {
     if (channel) {
       channel.close();
     }
     window.removeEventListener("storage", handleStorage);
-    window.removeEventListener("workpulse:job_status_update", handleCustom);
+    window.removeEventListener(CUSTOM_EVENT_NAME, handleCustom);
   };
 }
 
+/**
+ * Subscribes specifically to job status update notifications (backwards-compatible).
+ */
+export function subscribeToJobStatusChanges(
+  callback: (event: JobStatusChangeEvent) => void
+): () => void {
+  return subscribeToMarketplaceEvents((event) => {
+    if (event.type === "JOB_STATUS" && event.jobId && event.status) {
+      callback({
+        jobId: event.jobId,
+        status: event.status as "OPEN" | "PAUSED" | "CLOSED" | "DRAFT",
+        timestamp: event.timestamp,
+      });
+    }
+  });
+}

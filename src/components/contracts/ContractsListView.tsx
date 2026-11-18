@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ContractStatus, PaymentType } from "@prisma/client";
 import { formatDate } from "@/lib/utils";
 import { Avatar } from "@/components/ui/Avatar";
+import { subscribeToMarketplaceEvents } from "@/lib/events/job-events";
 
 export interface ContractListItem {
   id: string;
@@ -47,6 +48,15 @@ export function ContractsListView({
   useEffect(() => {
     setSelectedStatus(currentStatus?.toUpperCase() || "ALL");
   }, [currentStatus]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToMarketplaceEvents((event) => {
+      if (event.type === "CONTRACT_STATUS" || event.type === "MILESTONE_STATUS") {
+        router.refresh();
+      }
+    });
+    return unsubscribe;
+  }, [router]);
 
   const statusCounts = {
     ALL: contracts.length,

@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useEffect } from "react";
 import { submitProposalAction, SubmitProposalResult } from "@/lib/actions/proposal";
+import { broadcastProposalUpdate } from "@/lib/events/job-events";
 import {
   sendEmailVerificationOtpAction,
   verifyEmailOtpAction,
@@ -104,6 +105,7 @@ export function ApplyProposalModal({
       }
 
       if (result.proposalId) {
+        broadcastProposalUpdate(result.proposalId, "PENDING", job.id);
         onSuccess({
           id: result.proposalId,
           status: "PENDING",

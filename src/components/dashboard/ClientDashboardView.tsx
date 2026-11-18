@@ -9,7 +9,7 @@ import { JobStatus } from "@prisma/client";
 import { formatDate } from "@/lib/utils";
 import { Avatar } from "@/components/ui/Avatar";
 import { DirectHireModal } from "@/components/dashboard/DirectHireModal";
-import { broadcastJobStatusChange } from "@/lib/events/job-events";
+import { broadcastJobStatusChange, subscribeToMarketplaceEvents } from "@/lib/events/job-events";
 
 export interface ClientDashboardJob {
   id: string;
@@ -147,10 +147,45 @@ export function ClientDashboardView({
   const [hireFreelancer, setHireFreelancer] = useState<ClientDashboardFreelancer | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Reactive KPI counts with local state for immediate optimistic feedback
+  const [counts, setCounts] = useState({
+    activeJobs: activeJobsCount,
+    totalJobs: totalJobs,
+    totalProposals: totalProposalsCount,
+    ongoingContracts: ongoingContractsCount,
+  });
+
   // Sync state whenever server revalidates or sends fresh props
   useEffect(() => {
     setJobs(initialJobs);
   }, [initialJobs]);
+
+  useEffect(() => {
+    setCounts({
+      activeJobs: activeJobsCount,
+      totalJobs: totalJobs,
+      totalProposals: totalProposalsCount,
+      ongoingContracts: ongoingContractsCount,
+    });
+  }, [activeJobsCount, totalJobs, totalProposalsCount, ongoingContractsCount]);
+
+  // Subscribe to real-time marketplace events from other tabs/views
+  useEffect(() => {
+    const unsubscribe = subscribeToMarketplaceEvents((event) => {
+      if (
+        event.type === "JOB_STATUS" ||
+        event.type === "JOB_CREATED" ||
+        event.type === "PROPOSAL_STATUS" ||
+        event.type === "MILESTONE_STATUS" ||
+        event.type === "CONTRACT_STATUS"
+      ) {
+        startTransition(() => {
+          router.refresh();
+        });
+      }
+    });
+    return unsubscribe;
+  }, [router]);
 
   useEffect(() => {
     setSearchTerm(searchQuery);
@@ -221,6 +256,13 @@ export function ClientDashboardView({
       prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j))
     );
 
+    // Immediate optimistic update of active jobs count
+    if (previousStatus === "OPEN" && newStatus !== "OPEN") {
+      setCounts((c) => ({ ...c, activeJobs: Math.max(0, c.activeJobs - 1) }));
+    } else if (previousStatus !== "OPEN" && newStatus === "OPEN") {
+      setCounts((c) => ({ ...c, activeJobs: c.activeJobs + 1 }));
+    }
+
     try {
       const res = await updateJobStatusAction({ jobId, status: newStatus });
       if (!res.success) {
@@ -228,6 +270,11 @@ export function ClientDashboardView({
         setJobs((prev) =>
           prev.map((j) => (j.id === jobId ? { ...j, status: previousStatus } : j))
         );
+        if (previousStatus === "OPEN" && newStatus !== "OPEN") {
+          setCounts((c) => ({ ...c, activeJobs: c.activeJobs + 1 }));
+        } else if (previousStatus !== "OPEN" && newStatus === "OPEN") {
+          setCounts((c) => ({ ...c, activeJobs: Math.max(0, c.activeJobs - 1) }));
+        }
         setActionError(res.error || "Failed to update job status.");
       } else {
         // Broadcast change across tabs and other dashboard views
@@ -241,6 +288,11 @@ export function ClientDashboardView({
       setJobs((prev) =>
         prev.map((j) => (j.id === jobId ? { ...j, status: previousStatus } : j))
       );
+      if (previousStatus === "OPEN" && newStatus !== "OPEN") {
+        setCounts((c) => ({ ...c, activeJobs: c.activeJobs + 1 }));
+      } else if (previousStatus !== "OPEN" && newStatus === "OPEN") {
+        setCounts((c) => ({ ...c, activeJobs: Math.max(0, c.activeJobs - 1) }));
+      }
       setActionError("An unexpected network error occurred. Please try again.");
     } finally {
       setUpdatingJobIds((prev) => {
@@ -303,10 +355,10 @@ export function ClientDashboardView({
             <span>💼</span>
           </div>
           <p className="mt-2 text-2xl font-extrabold text-zinc-950 dark:text-white">
-            {activeJobsCount}
+            {counts.activeJobs}
           </p>
           <span className="text-[11px] text-zinc-400">
-            {totalJobs} total contracts posted
+            {counts.totalJobs} total contracts posted
           </span>
         </div>
 
@@ -320,7 +372,7 @@ export function ClientDashboardView({
             <span>📬</span>
           </div>
           <p className="mt-2 text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">
-            {totalProposalsCount}
+            {counts.totalProposals}
           </p>
           <span className="text-[11px] text-zinc-400">
             Review proposals & chat
@@ -337,7 +389,7 @@ export function ClientDashboardView({
             <span>🤝</span>
           </div>
           <p className="mt-2 text-2xl font-extrabold text-zinc-950 dark:text-white">
-            {ongoingContractsCount}
+            {counts.ongoingContracts}
           </p>
           <span className="text-[11px] text-zinc-400">
             Active milestone work

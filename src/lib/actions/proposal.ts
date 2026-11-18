@@ -260,6 +260,10 @@ export async function submitProposalAction(
     revalidatePath("/jobs");
     revalidatePath(`/jobs/${job.id}`);
     revalidatePath(`/dashboard/client/jobs/${job.id}/proposals`);
+    revalidatePath("/dashboard/freelancer");
+    revalidatePath("/dashboard/freelancer/proposals");
+    revalidatePath("/dashboard/client");
+    revalidatePath("/dashboard/client/proposals");
 
     return {
       success: true,
@@ -403,7 +407,10 @@ export async function updateProposalStatusAction(
       });
 
       revalidatePath(`/dashboard/client/jobs/${proposal.job.id}/proposals`);
-      revalidatePath(`/dashboard/freelancer/proposals`);
+      revalidatePath("/dashboard/client");
+      revalidatePath("/dashboard/client/proposals");
+      revalidatePath("/dashboard/freelancer");
+      revalidatePath("/dashboard/freelancer/proposals");
       return { success: true, proposalId, status };
     }
 
@@ -593,10 +600,13 @@ export async function updateProposalStatusAction(
       }
 
       revalidatePath("/dashboard/client");
+      revalidatePath("/dashboard/client/proposals");
       revalidatePath("/dashboard/freelancer");
+      revalidatePath("/dashboard/freelancer/proposals");
       revalidatePath("/contracts");
       revalidatePath(`/contracts/${txResult.contract.id}`);
       revalidatePath("/messages");
+      revalidatePath("/jobs");
       revalidatePath(`/jobs/${proposal.job.id}`);
       revalidatePath(`/dashboard/client/jobs/${proposal.job.id}/proposals`);
 
@@ -631,7 +641,10 @@ export async function updateProposalStatusAction(
 
       revalidatePath(`/jobs/${updated.jobId}`);
       revalidatePath(`/dashboard/client/jobs/${updated.jobId}/proposals`);
+      revalidatePath("/dashboard/client");
+      revalidatePath("/dashboard/client/proposals");
       revalidatePath("/dashboard/freelancer");
+      revalidatePath("/dashboard/freelancer/proposals");
 
       return {
         success: true,

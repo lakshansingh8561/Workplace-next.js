@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { updateProposalStatusAction } from "@/lib/actions/proposal";
 import { getOrCreatePreHireConversationAction } from "@/lib/actions/message";
+import { broadcastProposalUpdate, broadcastJobStatusChange } from "@/lib/events/job-events";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProposalStatus } from "@/types";
 
@@ -167,6 +168,8 @@ export function ClientProposalReview({
 
       setActiveActionId(null);
       setHireModalProposal(null);
+      broadcastProposalUpdate(proposalId, "ACCEPTED", job.id);
+      broadcastJobStatusChange(job.id, "CLOSED");
       router.refresh();
     });
   };
@@ -201,6 +204,7 @@ export function ClientProposalReview({
 
       setActiveActionId(null);
       setDeclineModalProposal(null);
+      broadcastProposalUpdate(proposalId, "REJECTED", job.id);
       router.refresh();
     });
   };

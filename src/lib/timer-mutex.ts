@@ -54,7 +54,7 @@ export type ReservationResult = {
   error?: string;
 };
 
-/**
+/**                                   
  * Atomically acquires a distributed database-level reservation within an active transaction.
  *
  * Enforces:

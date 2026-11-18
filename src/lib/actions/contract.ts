@@ -393,6 +393,7 @@ export async function submitMilestoneAction(
     revalidatePath("/contracts");
     revalidatePath(`/contracts/${milestone.contract.id}`);
     revalidatePath("/dashboard/freelancer");
+    revalidatePath("/dashboard/client");
 
     // Safe in-app notification for client
     await createNotificationSafe({
@@ -679,6 +680,7 @@ export async function approveMilestoneAction(
     revalidatePath("/contracts");
     revalidatePath(`/contracts/${milestone.contract.id}`);
     revalidatePath("/dashboard/client");
+    revalidatePath("/dashboard/freelancer");
 
     // Safe in-app notification for freelancer
     await createNotificationSafe({
@@ -860,6 +862,7 @@ export async function requestMilestoneChangesAction(
     revalidatePath("/contracts");
     revalidatePath(`/contracts/${milestone.contract.id}`);
     revalidatePath("/dashboard/freelancer");
+    revalidatePath("/dashboard/client");
 
     // In-app notification to Freelancer
     await createNotificationSafe({
