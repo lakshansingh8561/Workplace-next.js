@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -10,6 +10,7 @@ import {
 import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
 import { Avatar } from "@/components/ui/Avatar";
 import { formatDate } from "@/lib/utils";
+import { subscribeToJobStatusChanges } from "@/lib/events/job-events";
 
 interface FreelancerProposalsViewProps {
   proposals: FreelancerProposalItem[];
@@ -33,8 +34,26 @@ export function FreelancerProposalsView({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState(searchQuery);
+  const [selectedStatus, setSelectedStatus] = useState<string>(
+    currentStatus?.toUpperCase() || "ALL"
+  );
   const [activeChatProposalId, setActiveChatProposalId] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedStatus(currentStatus?.toUpperCase() || "ALL");
+  }, [currentStatus]);
+
+  useEffect(() => {
+    setSearchTerm(searchQuery || "");
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToJobStatusChanges(() => {
+      router.refresh();
+    });
+    return unsubscribe;
+  }, [router]);
 
   const handleMessageClient = async (proposal: FreelancerProposalItem) => {
     const targetClientId = proposal.job.clientId || proposal.job.client?.id;
@@ -59,6 +78,7 @@ export function FreelancerProposalsView({
   };
 
   const handleStatusFilter = (status: string) => {
+    setSelectedStatus(status);
     const params = new URLSearchParams(searchParams.toString());
     if (status === "ALL") {
       params.delete("status");
@@ -66,7 +86,9 @@ export function FreelancerProposalsView({
       params.set("status", status);
     }
     params.set("page", "1");
-    router.push(`/dashboard/freelancer/proposals?${params.toString()}`);
+    const targetUrl = `/dashboard/freelancer/proposals?${params.toString()}`;
+    router.push(targetUrl);
+    router.refresh();
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -78,13 +100,17 @@ export function FreelancerProposalsView({
       params.delete("search");
     }
     params.set("page", "1");
-    router.push(`/dashboard/freelancer/proposals?${params.toString()}`);
+    const targetUrl = `/dashboard/freelancer/proposals?${params.toString()}`;
+    router.push(targetUrl);
+    router.refresh();
   };
 
   const handlePageChange = (page: number) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("page", String(page));
-    router.push(`/dashboard/freelancer/proposals?${params.toString()}`);
+    const targetUrl = `/dashboard/freelancer/proposals?${params.toString()}`;
+    router.push(targetUrl);
+    router.refresh();
   };
 
   const filterTabs = [
@@ -95,7 +121,7 @@ export function FreelancerProposalsView({
   ];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-zinc-200/80 dark:border-zinc-800">
         <div>
@@ -113,12 +139,6 @@ export function FreelancerProposalsView({
         </div>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard/freelancer/invitations"
-            className="inline-flex items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-2 text-xs font-bold text-indigo-700 shadow-sm hover:bg-indigo-100 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60 transition active:scale-95 whitespace-nowrap shrink-0"
-          >
-            🤝 Invitations
-          </Link>
           <Link
             href="/dashboard/freelancer/payments"
             className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs font-bold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 transition active:scale-95 whitespace-nowrap shrink-0"
@@ -169,7 +189,8 @@ export function FreelancerProposalsView({
         <div className="flex flex-wrap gap-2">
           {filterTabs.map((tab) => {
             const isSelected =
-              tab.id === "ALL" ? !currentStatus : currentStatus.toUpperCase() === tab.id;
+              tab.id === selectedStatus ||
+              (tab.id === "ALL" && (!selectedStatus || selectedStatus === "ALL"));
             return (
               <button
                 key={tab.id}
@@ -219,7 +240,9 @@ export function FreelancerProposalsView({
                 const params = new URLSearchParams(searchParams.toString());
                 params.delete("search");
                 params.set("page", "1");
-                router.push(`/dashboard/freelancer/proposals?${params.toString()}`);
+                const targetUrl = `/dashboard/freelancer/proposals?${params.toString()}`;
+                router.push(targetUrl);
+                router.refresh();
               }}
               className="rounded-xl px-2.5 py-1.5 text-xs font-semibold text-zinc-400 hover:text-zinc-600"
             >
@@ -342,6 +365,7 @@ export function FreelancerProposalsView({
                             src={proposal.job.client?.image}
                             name={proposal.job.client?.companyName || proposal.job.client?.name || proposal.job.clientName || "Client"}
                             role="CLIENT"
+                            userId={proposal.job.clientId || proposal.job.client?.id}
                             size="sm"
                           />
                           <div className="min-w-0">

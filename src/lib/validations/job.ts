@@ -117,7 +117,7 @@ export const UpdateJobStatusSchema = z.object({
   jobId: z
     .string()
     .trim()
-    .regex(OBJECT_ID_REGEX, "Invalid Job ID. Expected a 24-character hexadecimal ObjectId"),
+    .min(1, "Job ID is required"),
   status: z.enum(["OPEN", "PAUSED", "CLOSED"], {
     error: "Status must be OPEN, PAUSED, or CLOSED",
   }),

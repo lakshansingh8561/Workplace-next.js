@@ -77,6 +77,9 @@ async function ContractDetailContent({ params }: ContractDetailPageProps) {
           amount: true,
           dueDate: true,
           status: true,
+          isPaid: true,
+          paidAt: true,
+          submissions: true,
           createdAt: true,
         },
       },
@@ -161,6 +164,34 @@ async function ContractDetailContent({ params }: ContractDetailPageProps) {
         (m as { paidAt?: Date | null }).paidAt ||
         null;
 
+      const submissions = (m.submissions || []).map((sub) => ({
+        id: sub.id,
+        freelancerId: sub.freelancerId,
+        description: sub.description,
+        status: sub.status,
+        submittedAt: sub.submittedAt.toISOString(),
+        reviewedAt: sub.reviewedAt?.toISOString() || null,
+        reviewerId: sub.reviewerId || null,
+        revisionFeedback: sub.revisionFeedback || null,
+        attachments: (sub.attachments || []).map((att) => ({
+          id: att.id,
+          fileName: att.fileName,
+          fileUrl: att.fileUrl,
+          fileType: att.fileType,
+          fileSize: att.fileSize,
+          storageProvider: att.storageProvider || null,
+          createdAt: att.createdAt.toISOString(),
+        })),
+        links: (sub.links || []).map((lnk) => ({
+          id: lnk.id,
+          title: lnk.title || null,
+          url: lnk.url,
+          createdAt: lnk.createdAt.toISOString(),
+        })),
+        createdAt: sub.createdAt.toISOString(),
+        updatedAt: sub.updatedAt.toISOString(),
+      }));
+
       return {
         id: m.id,
         title: m.title,
@@ -170,6 +201,7 @@ async function ContractDetailContent({ params }: ContractDetailPageProps) {
         status: m.status,
         isPaid,
         paidAt: paidDate ? paidDate.toISOString() : null,
+        submissions,
         createdAt: m.createdAt.toISOString(),
       };
     }),
@@ -191,7 +223,7 @@ export default function ContractDetailPage({ params }: ContractDetailPageProps) 
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
           Loading Contract Details...
         </div>
       }

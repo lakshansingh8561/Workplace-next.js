@@ -14,6 +14,7 @@ import { ApplyProposalModal } from "./ApplyProposalModal";
 import { SaveJobButton } from "./SaveJobButton";
 import { Avatar } from "@/components/ui/Avatar";
 import { isSafeHttpUrl } from "@/lib/validations/profile";
+import { subscribeToJobStatusChanges } from "@/lib/events/job-events";
 
 interface JobDetailsViewProps {
   jobId: string;
@@ -107,6 +108,21 @@ export function JobDetailsView({
     }
   }, []);
 
+  // Real-time synchronization when a client pauses or reopens this job
+  useEffect(() => {
+    const unsubscribe = subscribeToJobStatusChanges((evt) => {
+      if (evt.jobId === jobId) {
+        setFetchedJob((prev) => {
+          const current = prev ?? initialJob;
+          if (!current) return null;
+          return { ...current, status: evt.status as any };
+        });
+        router.refresh();
+      }
+    });
+    return unsubscribe;
+  }, [jobId, initialJob, router]);
+
   useEffect(() => {
     // Only fetch via API if initialJob wasn't provided or job is missing
     if (initialJob || fetchedJob) return;
@@ -147,7 +163,7 @@ export function JobDetailsView({
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-12 animate-pulse space-y-6">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-12 animate-pulse space-y-6">
         <div className="h-4 w-32 bg-zinc-200 rounded dark:bg-zinc-800" />
         <div className="h-8 w-2/3 bg-zinc-200 rounded dark:bg-zinc-800" />
         <div className="h-32 bg-zinc-100 rounded-2xl dark:bg-zinc-800/50" />
@@ -213,7 +229,7 @@ export function JobDetailsView({
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Back Link */}
       <div className="mb-6">
         <Link
@@ -647,6 +663,7 @@ export function JobDetailsView({
                   src={job.client?.image}
                   name={job.client?.companyName || job.client?.name || job.clientName || "Client"}
                   role="CLIENT"
+                  userId={job.clientId || job.client?.id}
                   size="lg"
                 />
                 <div className="min-w-0 flex-1">

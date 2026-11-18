@@ -668,7 +668,7 @@ export async function verifyEmailOtpAction(
   if (!attemptLimit.success) {
     return {
       success: false,
-      error: "Too many verification attempts. Please wait 10 minutes or request a new code.",
+      error: "Too many failed attempts. Please request a new code.",
     };
   }
 
@@ -688,22 +688,36 @@ export async function verifyEmailOtpAction(
       });
 
       if (!record) {
+        // Check if an expired token exists for this email to return specific error
+        const existingForEmail = await tx.emailVerificationToken.findFirst({
+          where: { email },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (existingForEmail && existingForEmail.expiresAt < new Date()) {
+          return {
+            valid: false,
+            expired: true,
+            error: "Verification code has expired. Please request a new code.",
+          };
+        }
+
         return {
           valid: false,
-          error: "Invalid verification code. Please check your email or request a new code.",
+          error: "Invalid verification code. Please try again.",
         };
       }
 
       // 2. Check expiration (10 minutes)
       if (record.expiresAt < new Date()) {
-        await tx.emailVerificationToken.delete({
-          where: { id: record.id },
+        await tx.emailVerificationToken.deleteMany({
+          where: { email },
         });
 
         return {
           valid: false,
           expired: true,
-          error: "This verification code has expired. Please request a new one.",
+          error: "Verification code has expired. Please request a new code.",
         };
       }
 

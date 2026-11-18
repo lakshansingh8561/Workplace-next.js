@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { signOut } from "next-auth/react";
 import {
   verifyEmailAction,
   sendEmailVerificationOtpAction,
@@ -21,15 +22,40 @@ export function VerifyEmailView() {
   const [, startTransition] = useTransition();
   const [isOtpPending, startOtpTransition] = useTransition();
   const [isResendPending, startResendTransition] = useTransition();
+  const [isSigningOutConflicting, startSignOutTransition] = useTransition();
 
   const [status, setStatus] = useState<
     "verifying_token" | "otp_entry" | "success" | "alreadyVerified" | "expired" | "error"
   >(token ? "verifying_token" : "otp_entry");
 
-  const [email, setEmail] = useState(emailParam);
-  const [userRole, setUserRole] = useState<"CLIENT" | "FREELANCER" | null>(
-    roleParam || null
-  );
+  // Determine initial email with sessionStorage fallback (protects against page refresh)
+  const [email, setEmail] = useState(() => {
+    if (emailParam) return emailParam.trim().toLowerCase();
+    if (typeof window !== "undefined") {
+      try {
+        const stored = sessionStorage.getItem("workpulse_verify_email");
+        if (stored) return stored.trim().toLowerCase();
+      } catch {
+        // Fallback gracefully
+      }
+    }
+    return "";
+  });
+
+  const [userRole, setUserRole] = useState<"CLIENT" | "FREELANCER" | null>(() => {
+    if (roleParam) return roleParam;
+    if (typeof window !== "undefined") {
+      try {
+        const storedRole = sessionStorage.getItem("workpulse_verify_role");
+        if (storedRole === "CLIENT" || storedRole === "FREELANCER") return storedRole;
+      } catch {
+        // Fallback gracefully
+      }
+    }
+    return null;
+  });
+
+  const [activeSessionEmail, setActiveSessionEmail] = useState<string | null>(null);
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -37,6 +63,20 @@ export function VerifyEmailView() {
   // Resend countdown state (starts at 60s if email was just registered, else 0)
   const [resendCooldown, setResendCooldown] = useState(emailParam ? 60 : 0);
   const otpInputsRef = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Persist email in sessionStorage whenever emailParam is present
+  useEffect(() => {
+    if (emailParam && typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem("workpulse_verify_email", emailParam.trim().toLowerCase());
+        if (roleParam) {
+          sessionStorage.setItem("workpulse_verify_role", roleParam);
+        }
+      } catch {
+        // Storage restricted
+      }
+    }
+  }, [emailParam, roleParam]);
 
   // If token is present in URL (legacy verification link)
   const handleVerifyToken = useCallback((tokenToVerify: string) => {
@@ -75,17 +115,23 @@ export function VerifyEmailView() {
     }
   }, [token, handleVerifyToken]);
 
-  // Sync authenticated session email ONLY if no email was supplied in URL
+  // Sync authenticated session status to detect any conflicting active user session
   useEffect(() => {
     let active = true;
     fetch("/api/auth/session")
       .then((res) => (res.ok ? res.json() : null))
       .then((session) => {
         if (!active) return;
-        if (!emailParam && session?.user?.email && !email) {
-          setEmail(session.user.email.toLowerCase());
+        if (session?.user?.email) {
+          const sessEmail = session.user.email.toLowerCase().trim();
+          setActiveSessionEmail(sessEmail);
+
+          // If no email in URL and no email in state, populate from verified session
+          if (!emailParam && !email) {
+            setEmail(sessEmail);
+          }
         }
-        if (session?.user?.role && !roleParam) {
+        if (session?.user?.role && !roleParam && !userRole) {
           setUserRole(session.user.role as "CLIENT" | "FREELANCER");
         }
       })
@@ -94,7 +140,7 @@ export function VerifyEmailView() {
     return () => {
       active = false;
     };
-  }, [emailParam, email, roleParam]);
+  }, [emailParam, email, roleParam, userRole]);
 
   // Keep email in sync with URL searchParams
   useEffect(() => {
@@ -145,7 +191,12 @@ export function VerifyEmailView() {
     }
   }, [status, email]);
 
+  // Handle typing & replacement into an OTP input box
   const handleOtpChange = (index: number, value: string) => {
+    // Clear any previous error when user modifies OTP
+    if (errorMessage) setErrorMessage(null);
+    if (successMessage) setSuccessMessage(null);
+
     // Only accept numeric digits
     const cleaned = value.replace(/\D/g, "");
 
@@ -167,14 +218,36 @@ export function VerifyEmailView() {
     }
   };
 
+  // Handle keyboard navigation: backspace, left/right arrows
   const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Backspace" && !otp[index] && index > 0) {
+    if (errorMessage) setErrorMessage(null);
+
+    if (e.key === "Backspace") {
+      if (otp[index]) {
+        // Clear current digit if populated
+        const newOtp = [...otp];
+        newOtp[index] = "";
+        setOtp(newOtp);
+      } else if (index > 0) {
+        // If current digit is already empty, move to previous box and clear it
+        otpInputsRef.current[index - 1]?.focus();
+        const newOtp = [...otp];
+        newOtp[index - 1] = "";
+        setOtp(newOtp);
+      }
+    } else if (e.key === "ArrowLeft" && index > 0) {
       otpInputsRef.current[index - 1]?.focus();
+    } else if (e.key === "ArrowRight" && index < 5) {
+      otpInputsRef.current[index + 1]?.focus();
     }
   };
 
+  // Handle pasting full 6-digit code
   const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
+    if (errorMessage) setErrorMessage(null);
+    if (successMessage) setSuccessMessage(null);
+
     const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
     if (!pasted) return;
 
@@ -184,8 +257,21 @@ export function VerifyEmailView() {
     }
     setOtp(newOtp);
 
-    const targetFocus = Math.min(5, pasted.length);
+    const targetFocus = Math.min(5, Math.max(0, pasted.length - 1));
     otpInputsRef.current[targetFocus]?.focus();
+  };
+
+  // Sign out conflicting active session to allow smooth verification
+  const handleSignOutConflictingSession = () => {
+    startSignOutTransition(async () => {
+      try {
+        await signOut({ redirect: false });
+        setActiveSessionEmail(null);
+        setErrorMessage(null);
+      } catch {
+        // Fallback
+      }
+    });
   };
 
   // Submit OTP Verification
@@ -217,6 +303,12 @@ export function VerifyEmailView() {
           if (result.role) {
             setUserRole(result.role);
           }
+          try {
+            sessionStorage.removeItem("workpulse_verify_email");
+          } catch {
+            // Safe cleanup
+          }
+
           if (result.alreadyVerified) {
             setStatus("alreadyVerified");
           } else {
@@ -266,6 +358,12 @@ export function VerifyEmailView() {
       }
     });
   };
+
+  const targetEmailNormalized = (emailParam || email).trim().toLowerCase();
+  const hasConflictingSession =
+    Boolean(activeSessionEmail) &&
+    Boolean(targetEmailNormalized) &&
+    activeSessionEmail !== targetEmailNormalized;
 
   return (
     <div className="w-full max-w-md mx-auto">
@@ -419,6 +517,33 @@ export function VerifyEmailView() {
               )}
             </div>
 
+            {/* Conflicting Session Notice & One-Click Signout */}
+            {hasConflictingSession && (
+              <div
+                role="alert"
+                className="mb-4 rounded-2xl border border-amber-300 bg-amber-50/90 p-4 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200 shadow-sm"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-amber-900 dark:text-amber-100 mb-0.5">
+                      Different Account Signed In
+                    </p>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                      You are signed in as <strong>{activeSessionEmail}</strong>. To verify <strong>{targetEmailNormalized}</strong>, sign out of the active account first.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isSigningOutConflicting}
+                    onClick={handleSignOutConflictingSession}
+                    className="shrink-0 rounded-xl bg-amber-700 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-500 cursor-pointer disabled:opacity-50 text-center transition"
+                  >
+                    {isSigningOutConflicting ? "Signing out..." : "Sign Out to Verify"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {errorMessage && (
               <div
                 role="alert"
@@ -451,7 +576,10 @@ export function VerifyEmailView() {
                     type="email"
                     required
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      if (errorMessage) setErrorMessage(null);
+                      setEmail(e.target.value);
+                    }}
                     placeholder="you@example.com"
                     className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
                   />

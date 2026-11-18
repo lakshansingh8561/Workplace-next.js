@@ -61,7 +61,7 @@ export function ClientDiscoveryView({ initialData }: ClientDiscoveryViewProps) {
   const clients = initialData.clients || [];
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-950 dark:text-white">

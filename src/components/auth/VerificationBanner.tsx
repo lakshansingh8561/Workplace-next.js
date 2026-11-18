@@ -47,9 +47,9 @@ export function VerificationBanner({
     <div
       role="region"
       aria-label="Email verification notice"
-      className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 sm:px-6"
+      className="bg-amber-500/10 border-b border-amber-500/20 px-4 sm:px-6 lg:px-8 py-2.5"
     >
-      <div className="mx-auto max-w-7xl flex flex-wrap items-center justify-between gap-2 text-xs">
+      <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
           <svg
             className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400"

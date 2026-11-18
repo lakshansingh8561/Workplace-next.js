@@ -9,7 +9,6 @@ import { PublicReviewsList } from "@/components/reviews/PublicReviewsList";
 import { StaticStarRating } from "@/components/reviews/StarRating";
 import { isSafeHttpUrl } from "@/lib/validations/profile";
 import { Avatar } from "@/components/ui/Avatar";
-import { SendInvitationModal } from "@/components/dashboard/SendInvitationModal";
 import { DirectHireModal } from "@/components/dashboard/DirectHireModal";
 import { getOrCreatePreHireConversationAction, getOrCreateDirectConversationAction } from "@/lib/actions/message";
 
@@ -32,9 +31,7 @@ export function PublicFreelancerProfileView({
 }: PublicFreelancerProfileViewProps) {
   const router = useRouter();
   const displayName = profile.name || "Freelancer";
-  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [isDirectHireOpen, setIsDirectHireOpen] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<string>(clientJobs[0]?.id || "");
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
@@ -81,10 +78,7 @@ export function PublicFreelancerProfileView({
     setIsStartingChat(true);
     setChatError(null);
     try {
-      const res = await getOrCreateDirectConversationAction(
-        profile.id,
-        selectedJobId || undefined
-      );
+      const res = await getOrCreateDirectConversationAction(profile.id);
       if (res.success && res.conversationId) {
         router.push(`/messages?conversationId=${res.conversationId}`);
       } else {
@@ -99,7 +93,7 @@ export function PublicFreelancerProfileView({
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Private Profile Banner for Owner */}
       {isOwner && profile.visibility === "PRIVATE" && (
         <div className="mb-6 rounded-2xl bg-amber-50 p-4 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 text-xs sm:text-sm font-semibold text-amber-800 dark:text-amber-300 flex items-center justify-between">
@@ -245,35 +239,6 @@ export function PublicFreelancerProfileView({
                       <span>💬</span>
                       <span>{isStartingChat ? "Opening Chat..." : "Message Freelancer"}</span>
                     </button>
-
-                    {/* Job Invitation (if client has jobs) */}
-                    {clientJobs.length > 0 && (
-                      <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">
-                          Or Invite to Open Job
-                        </label>
-                        <div className="flex gap-2">
-                          <select
-                            value={selectedJobId}
-                            onChange={(e) => setSelectedJobId(e.target.value)}
-                            className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-800 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
-                          >
-                            {clientJobs.map((j) => (
-                              <option key={j.id} value={j.id}>
-                                {j.title}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => setIsInviteModalOpen(true)}
-                            className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-850 dark:bg-indigo-950/40 dark:text-indigo-300 transition"
-                          >
-                            Invite
-                          </button>
-                        </div>
-                      </div>
-                    )}
 
                     {chatError && (
                       <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 text-center">
@@ -654,22 +619,6 @@ export function PublicFreelancerProfileView({
           )}
         </div>
       </div>
-
-      {/* Interview Invitation Modal */}
-      {isInviteModalOpen && selectedJobId && (
-        <SendInvitationModal
-          isOpen={isInviteModalOpen}
-          onClose={() => setIsInviteModalOpen(false)}
-          jobId={selectedJobId}
-          jobTitle={clientJobs.find((j) => j.id === selectedJobId)?.title || "Project Opening"}
-          freelancerId={profile.id}
-          freelancerName={displayName}
-          onSuccess={(conversationId) => {
-            setIsInviteModalOpen(false);
-            router.push(`/messages?conversationId=${conversationId}`);
-          }}
-        />
-      )}
 
       {/* Direct Hire Modal */}
       {isDirectHireOpen && (

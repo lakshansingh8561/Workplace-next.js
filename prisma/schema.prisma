@@ -106,6 +106,7 @@ enum MilestoneStatus {
   ACTIVE
   SUBMITTED
   APPROVED
+  REVISION_REQUESTED
 }
 
 model User {
@@ -251,12 +252,45 @@ model ContractMilestone {
   isPaid      Boolean         @default(false)
   paidAt      DateTime?
   payments    Payment[]
+  submissions MilestoneSubmission[]
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
   @@index([contractId])
   @@index([status])
   @@map("contract_milestones")
+}
+
+type MilestoneSubmissionAttachment {
+  id              String
+  fileName        String
+  fileUrl         String
+  fileType        String
+  fileSize        Int
+  storageProvider String?
+  createdAt       DateTime @default(now())
+}
+
+type MilestoneSubmissionLink {
+  id        String
+  title     String?
+  url       String
+  createdAt DateTime @default(now())
+}
+
+type MilestoneSubmission {
+  id                String
+  freelancerId      String
+  description       String
+  status            String   @default("SUBMITTED")
+  submittedAt       DateTime @default(now())
+  reviewedAt        DateTime?
+  reviewerId        String?
+  revisionFeedback  String?
+  attachments       MilestoneSubmissionAttachment[]
+  links             MilestoneSubmissionLink[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @default(now())
 }
 
 enum ConversationType {

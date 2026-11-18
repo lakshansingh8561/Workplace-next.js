@@ -63,7 +63,7 @@ export default function FreelancersPage({ searchParams }: FreelancersPageProps) 
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 pb-16">
       <Suspense
         fallback={
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16 text-center">
+          <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center">
             <div className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
             <p className="mt-3 text-xs text-zinc-500 font-medium">Loading talent directory...</p>
           </div>

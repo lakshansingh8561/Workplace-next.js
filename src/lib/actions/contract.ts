@@ -5,6 +5,7 @@ import { verifyUserForAction } from "@/lib/session";
 import {
   CreateMilestoneSchema,
   MilestoneActionSchema,
+  RequestMilestoneChangesSchema,
   UpdateContractStatusSchema,
   DeleteContractSchema,
 } from "@/lib/validations/contract";
@@ -206,7 +207,7 @@ export async function submitMilestoneAction(
     };
   }
 
-  const { milestoneId } = result.data;
+  const { milestoneId, description, attachments, links } = result.data;
 
   try {
     const milestone = await prisma.contractMilestone.findUnique({
@@ -269,7 +270,10 @@ export async function submitMilestoneAction(
       };
     }
 
-    if (milestone.status !== MilestoneStatus.ACTIVE) {
+    if (
+      milestone.status !== MilestoneStatus.ACTIVE &&
+      milestone.status !== MilestoneStatus.REVISION_REQUESTED
+    ) {
       return {
         success: false,
         error: `Cannot submit work. Milestone is currently ${milestone.status.toLowerCase()}.`,
@@ -297,18 +301,49 @@ export async function submitMilestoneAction(
         throw new Error("MILESTONE_NOT_FOUND");
       }
 
-      if (freshMilestone.status !== MilestoneStatus.ACTIVE) {
+      if (
+        freshMilestone.status !== MilestoneStatus.ACTIVE &&
+        freshMilestone.status !== MilestoneStatus.REVISION_REQUESTED
+      ) {
         return {
           transitioned: false,
           milestone: freshMilestone,
         };
       }
 
+      const submission = {
+        id: crypto.randomUUID(),
+        freelancerId: user.id,
+        description: description || "Milestone completed deliverable",
+        status: "SUBMITTED",
+        submittedAt: new Date(),
+        attachments: (attachments || []).map((att) => ({
+          id: crypto.randomUUID(),
+          fileName: att.fileName,
+          fileUrl: att.fileUrl,
+          fileType: att.fileType,
+          fileSize: att.fileSize,
+          storageProvider: att.storageProvider || "cloudinary",
+          createdAt: new Date(),
+        })),
+        links: (links || []).map((lnk) => ({
+          id: crypto.randomUUID(),
+          title: lnk.title || null,
+          url: lnk.url,
+          createdAt: new Date(),
+        })),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
       const updated = await tx.contractMilestone.update({
         where: { id: milestoneId },
         data: {
           status: MilestoneStatus.SUBMITTED,
           lifecycleVersion: { increment: 1 },
+          submissions: {
+            push: submission,
+          },
         },
         select: {
           id: true,
@@ -560,6 +595,7 @@ export async function approveMilestoneAction(
           id: true,
           status: true,
           lifecycleVersion: true,
+          submissions: true,
         },
       });
 
@@ -574,11 +610,26 @@ export async function approveMilestoneAction(
         };
       }
 
+      const existingSubs = freshMilestone.submissions || [];
+      const updatedSubs = existingSubs.map((sub, idx) => {
+        if (idx === existingSubs.length - 1) {
+          return {
+            ...sub,
+            status: "APPROVED",
+            reviewedAt: new Date(),
+            reviewerId: user.id,
+            updatedAt: new Date(),
+          };
+        }
+        return sub;
+      });
+
       const updated = await tx.contractMilestone.update({
         where: { id: milestoneId },
         data: {
           status: MilestoneStatus.APPROVED,
           lifecycleVersion: { increment: 1 },
+          submissions: updatedSubs,
         },
         select: {
           id: true,
@@ -708,6 +759,127 @@ export async function approveMilestoneAction(
     return {
       success: false,
       error: "Failed to approve milestone. Please try again.",
+    };
+  }
+}
+
+/**
+ * Server Action for client owners to request changes / revisions on a submitted milestone deliverable.
+ */
+export async function requestMilestoneChangesAction(
+  input: unknown
+): Promise<MilestoneActionResult> {
+  const authRes = await verifyUserForAction(
+    "CLIENT",
+    "Unauthorized: Only client accounts can request changes on milestones."
+  );
+  if (!authRes.success) {
+    return {
+      success: false,
+      error: authRes.error,
+    };
+  }
+  const user = authRes.user;
+
+  const result = RequestMilestoneChangesSchema.safeParse(input);
+  if (!result.success) {
+    return {
+      success: false,
+      error: result.error.issues[0]?.message || "Invalid change request input.",
+    };
+  }
+
+  const { milestoneId, feedback } = result.data;
+
+  try {
+    const milestone = await prisma.contractMilestone.findUnique({
+      where: { id: milestoneId },
+      include: {
+        contract: {
+          select: {
+            id: true,
+            clientId: true,
+            freelancerId: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!milestone) {
+      return { success: false, error: "Milestone not found." };
+    }
+
+    if (milestone.contract.clientId !== user.id) {
+      return { success: false, error: "Unauthorized: You do not own this contract." };
+    }
+
+    if (milestone.contract.status !== ContractStatus.ACTIVE) {
+      return {
+        success: false,
+        error: `Cannot request changes. Contract is ${milestone.contract.status.toLowerCase()}.`,
+      };
+    }
+
+    if (milestone.status !== MilestoneStatus.SUBMITTED) {
+      return {
+        success: false,
+        error: `Cannot request changes. Milestone is currently ${milestone.status.toLowerCase()}, not submitted for review.`,
+      };
+    }
+
+    const existingSubmissions = milestone.submissions || [];
+    const updatedSubmissions = existingSubmissions.map((sub, idx) => {
+      if (idx === existingSubmissions.length - 1) {
+        return {
+          ...sub,
+          status: "REVISION_REQUESTED",
+          reviewedAt: new Date(),
+          reviewerId: user.id,
+          revisionFeedback: feedback,
+          updatedAt: new Date(),
+        };
+      }
+      return sub;
+    });
+
+    const updated = await prisma.contractMilestone.update({
+      where: { id: milestoneId },
+      data: {
+        status: MilestoneStatus.REVISION_REQUESTED,
+        lifecycleVersion: { increment: 1 },
+        submissions: updatedSubmissions,
+      },
+      select: {
+        id: true,
+        status: true,
+        lifecycleVersion: true,
+      },
+    });
+
+    revalidatePath("/contracts");
+    revalidatePath(`/contracts/${milestone.contract.id}`);
+    revalidatePath("/dashboard/freelancer");
+
+    // In-app notification to Freelancer
+    await createNotificationSafe({
+      userId: milestone.contract.freelancerId,
+      type: NotificationType.CONTRACT_STATUS,
+      title: "Revision Requested on Milestone",
+      message: `The client requested revisions on milestone "${milestone.title}": "${feedback.slice(0, 100)}${feedback.length > 100 ? "..." : ""}"`,
+      link: `/contracts/${milestone.contract.id}`,
+      idempotencyKey: `milestone:${milestone.id}:revision:v${updated.lifecycleVersion}`,
+    });
+
+    return {
+      success: true,
+      milestoneId: milestone.id,
+    };
+  } catch (error) {
+    console.error("[Request Milestone Changes Error]:", error);
+    return {
+      success: false,
+      error: "Failed to request changes on milestone. Please try again.",
     };
   }
 }

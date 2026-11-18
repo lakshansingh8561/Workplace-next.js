@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProposalStatus } from "@/types";
 import { formatDate } from "@/lib/utils";
+import { subscribeToJobStatusChanges } from "@/lib/events/job-events";
 
 export interface FreelancerDashboardProposal {
   id: string;
@@ -48,6 +49,13 @@ export function FreelancerDashboardView({
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState(searchQuery);
 
+  useEffect(() => {
+    const unsubscribe = subscribeToJobStatusChanges(() => {
+      router.refresh();
+    });
+    return unsubscribe;
+  }, [router]);
+
   const handleStatusFilter = (status: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (status === "ALL") {
@@ -78,7 +86,7 @@ export function FreelancerDashboardView({
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-zinc-200/80 dark:border-zinc-800">
         <div>
@@ -96,12 +104,6 @@ export function FreelancerDashboardView({
         </div>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard/freelancer/invitations"
-            className="inline-flex items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-2.5 text-xs font-bold text-indigo-700 shadow-sm hover:bg-indigo-100 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60 transition active:scale-95 whitespace-nowrap shrink-0"
-          >
-            🤝 Invitations
-          </Link>
           <Link
             href="/jobs/saved"
             className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-bold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 transition active:scale-95 whitespace-nowrap shrink-0"

@@ -57,7 +57,7 @@ async function ClientProfileContent() {
   return (
     <div className="space-y-10">
       <ClientProfileForm initialData={initialData} />
-      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 pb-16 space-y-10">
+      <div className="w-full px-4 sm:px-6 lg:px-8 pb-16 space-y-10">
         <ChangePasswordSection />
         <PublicReviewsList
           reviews={reviewsSummary.reviews}
@@ -75,7 +75,7 @@ export default function ClientProfilePage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
           Loading Client Profile...
         </div>
       }

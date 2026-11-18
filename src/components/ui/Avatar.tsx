@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import { getDeterministicAvatar, getInitials } from "@/lib/avatar-map";
 
@@ -67,11 +67,23 @@ export function Avatar({
 }: AvatarProps) {
   const [hasError, setHasError] = useState(false);
 
+  useEffect(() => {
+    setHasError(false);
+  }, [src]);
+
+  // Clean raw image string
+  const cleanSrc =
+    src &&
+    typeof src === "string" &&
+    src.trim().length > 0 &&
+    src.trim() !== "null" &&
+    src.trim() !== "undefined"
+      ? src.trim()
+      : null;
+
   // Derive resolved source
   const resolvedSrc =
-    src && src.trim().length > 0
-      ? src.trim()
-      : getDeterministicAvatar({ id: userId, name, role }, role);
+    cleanSrc || getDeterministicAvatar({ id: userId, name, role }, role);
 
   const initials = getInitials(name, role === "FREELANCER" ? "FL" : "CL");
   const accessibilityAlt =

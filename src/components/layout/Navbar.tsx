@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, Suspense, useSyncExternalStore } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logoutUser } from "@/lib/actions/auth";
 import { SessionUser } from "@/lib/session";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { Avatar } from "@/components/ui/Avatar";
-import { useAppDispatch } from "@/lib/store";
+import { useAppDispatch, useAppSelector } from "@/lib/store";
 import { setCredentials } from "@/lib/store/slices/authSlice";
 
 interface NavbarProps {
@@ -64,17 +64,13 @@ function useActiveNav() {
     if (href === "/dashboard/freelancer/payments") {
       return pathname === "/dashboard/freelancer/payments";
     }
-    if (href.startsWith("/dashboard/freelancer/invitations")) {
-      return pathname.startsWith("/dashboard/freelancer/invitations");
-    }
     if (
       href === "/dashboard/freelancer/proposals" ||
       href === "/dashboard/freelancer"
     ) {
       return (
         pathname.startsWith("/dashboard/freelancer") &&
-        pathname !== "/dashboard/freelancer/payments" &&
-        !pathname.startsWith("/dashboard/freelancer/invitations")
+        pathname !== "/dashboard/freelancer/payments"
       );
     }
     if (href.startsWith("/freelancers")) {
@@ -108,53 +104,49 @@ function DesktopNavList({
     <>
       {user.role === "CLIENT" ? (
         <>
-          <Link href="/freelancers" className={getLinkClass("/freelancers")}>
+          <Link href="/freelancers" prefetch={true} className={getLinkClass("/freelancers")}>
             Find Freelancers
           </Link>
-          <Link href="/dashboard/client" className={getLinkClass("/dashboard/client")}>
+          <Link href="/dashboard/client" prefetch={true} className={getLinkClass("/dashboard/client")}>
             My Jobs
           </Link>
-          <Link href="/jobs/new" className={getLinkClass("/jobs/new")}>
+          <Link href="/jobs/new" prefetch={true} className={getLinkClass("/jobs/new")}>
             Post a Job
           </Link>
-          <Link href="/dashboard/client/proposals" className={getLinkClass("/dashboard/client/proposals")}>
+          <Link href="/dashboard/client/proposals" prefetch={true} className={getLinkClass("/dashboard/client/proposals")}>
             Proposals
           </Link>
-          <Link href="/contracts" className={getLinkClass("/contracts")}>
+          <Link href="/contracts" prefetch={true} className={getLinkClass("/contracts")}>
             Contracts
           </Link>
-          <Link href="/messages" className={getLinkClass("/messages")}>
+          <Link href="/messages" prefetch={true} className={getLinkClass("/messages")}>
             Messages
           </Link>
         </>
       ) : (
         <>
-          <Link href="/jobs" className={getLinkClass("/jobs")}>
+          <Link href="/jobs" prefetch={true} className={getLinkClass("/jobs")}>
             Find Work
           </Link>
           <Link
             href="/dashboard/freelancer/proposals"
+            prefetch={true}
             className={getLinkClass("/dashboard/freelancer/proposals")}
           >
             My Proposals
           </Link>
-          <Link
-            href="/dashboard/freelancer/invitations"
-            className={getLinkClass("/dashboard/freelancer/invitations")}
-          >
-            Invitations
-          </Link>
-          <Link href="/clients" className={getLinkClass("/clients")}>
+          <Link href="/clients" prefetch={true} className={getLinkClass("/clients")}>
             Find Clients
           </Link>
-          <Link href="/contracts" className={getLinkClass("/contracts")}>
+          <Link href="/contracts" prefetch={true} className={getLinkClass("/contracts")}>
             Contracts
           </Link>
-          <Link href="/messages" className={getLinkClass("/messages")}>
+          <Link href="/messages" prefetch={true} className={getLinkClass("/messages")}>
             Messages
           </Link>
           <Link
             href="/dashboard/freelancer/payments"
+            prefetch={true}
             className={`hidden 2xl:inline-block ${getLinkClass("/dashboard/freelancer/payments")}`}
           >
             Earnings
@@ -163,6 +155,7 @@ function DesktopNavList({
       )}
       <Link
         href="/#enterprise"
+        prefetch={true}
         onClick={() => onHashClick?.("#enterprise")}
         className={`hidden 2xl:inline-block ${getLinkClass("/#enterprise")}`}
       >
@@ -173,16 +166,18 @@ function DesktopNavList({
     <>
       <Link
         href="/#categories"
+        prefetch={true}
         onClick={() => onHashClick?.("#categories")}
         className={getLinkClass("/#categories")}
       >
         Find Talent
       </Link>
-      <Link href="/jobs" className={getLinkClass("/jobs")}>
+      <Link href="/jobs" prefetch={true} className={getLinkClass("/jobs")}>
         Find Work
       </Link>
       <Link
         href="/#how-it-works"
+        prefetch={true}
         onClick={() => onHashClick?.("#how-it-works")}
         className={getLinkClass("/#how-it-works")}
       >
@@ -190,6 +185,7 @@ function DesktopNavList({
       </Link>
       <Link
         href="/#why-workpulse"
+        prefetch={true}
         onClick={() => onHashClick?.("#why-workpulse")}
         className={getLinkClass("/#why-workpulse")}
       >
@@ -197,6 +193,7 @@ function DesktopNavList({
       </Link>
       <Link
         href="/#enterprise"
+        prefetch={true}
         onClick={() => onHashClick?.("#enterprise")}
         className={getLinkClass("/#enterprise")}
       >
@@ -251,6 +248,7 @@ function MobileNavList({
         <>
           <Link
             href="/freelancers"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/freelancers")}
           >
@@ -258,6 +256,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/dashboard/client"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/dashboard/client")}
           >
@@ -265,6 +264,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/jobs/new"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/jobs/new")}
           >
@@ -272,6 +272,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/dashboard/client/proposals"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/dashboard/client/proposals")}
           >
@@ -279,6 +280,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/contracts"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/contracts")}
           >
@@ -286,6 +288,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/messages"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/messages")}
           >
@@ -293,6 +296,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/profile/client"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/profile/client")}
           >
@@ -303,6 +307,7 @@ function MobileNavList({
         <>
           <Link
             href="/jobs"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/jobs")}
           >
@@ -310,20 +315,15 @@ function MobileNavList({
           </Link>
           <Link
             href="/dashboard/freelancer/proposals"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/dashboard/freelancer/proposals")}
           >
             My Proposals
           </Link>
           <Link
-            href="/dashboard/freelancer/invitations"
-            onClick={closeMenu}
-            className={getLinkClass("/dashboard/freelancer/invitations")}
-          >
-            Invitations
-          </Link>
-          <Link
             href="/clients"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/clients")}
           >
@@ -331,6 +331,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/contracts"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/contracts")}
           >
@@ -338,6 +339,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/messages"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/messages")}
           >
@@ -345,6 +347,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/dashboard/freelancer/payments"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/dashboard/freelancer/payments")}
           >
@@ -352,6 +355,7 @@ function MobileNavList({
           </Link>
           <Link
             href="/profile/freelancer"
+            prefetch={true}
             onClick={closeMenu}
             className={getLinkClass("/profile/freelancer")}
           >
@@ -364,6 +368,7 @@ function MobileNavList({
     <>
       <Link
         href="/#categories"
+        prefetch={true}
         onClick={() => {
           onHashClick?.("#categories");
           closeMenu();
@@ -374,6 +379,7 @@ function MobileNavList({
       </Link>
       <Link
         href="/jobs"
+        prefetch={true}
         onClick={closeMenu}
         className={getLinkClass("/jobs")}
       >
@@ -381,6 +387,7 @@ function MobileNavList({
       </Link>
       <Link
         href="/#how-it-works"
+        prefetch={true}
         onClick={() => {
           onHashClick?.("#how-it-works");
           closeMenu();
@@ -391,6 +398,7 @@ function MobileNavList({
       </Link>
       <Link
         href="/#why-workpulse"
+        prefetch={true}
         onClick={() => {
           onHashClick?.("#why-workpulse");
           closeMenu();
@@ -401,6 +409,7 @@ function MobileNavList({
       </Link>
       <Link
         href="/#enterprise"
+        prefetch={true}
         onClick={() => {
           onHashClick?.("#enterprise");
           closeMenu();
@@ -454,10 +463,58 @@ function MobileNavListStatic({
   return <MobileNavList user={user} closeMenu={closeMenu} getLinkClass={getStaticClass} />;
 }
 
+function NavigationObserver({ onNavigate }: { onNavigate: () => void }) {
+  const pathname = usePathname();
+  useEffect(() => {
+    onNavigate();
+  }, [pathname, onNavigate]);
+  return null;
+}
+
 export function Navbar({ user }: NavbarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const dispatch = useAppDispatch();
+  const reduxUser = useAppSelector((state) => state.auth.user);
+
+  const currentImage =
+    reduxUser?.id === user?.id && reduxUser?.image !== undefined
+      ? reduxUser.image
+      : user?.image;
+
+  const handleRouteChange = useCallback(() => {
+    setIsMobileMenuOpen(false);
+    setIsUserMenuOpen(false);
+  }, []);
+
+  // Close dropdown on outside click or escape
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsUserMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsUserMenuOpen(false);
+        setIsMobileMenuOpen(false);
+      }
+    }
+
+    if (isUserMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isUserMenuOpen]);
 
   useEffect(() => {
     if (user) {
@@ -480,8 +537,11 @@ export function Navbar({ user }: NavbarProps) {
   }, [user, dispatch]);
 
   const closeMenu = () => {
-    setIsMobileMenuOpen(false);
-    setIsUserMenuOpen(false);
+    // Defer unmounting dropdowns slightly so click events finish dispatching to Next.js router
+    setTimeout(() => {
+      setIsMobileMenuOpen(false);
+      setIsUserMenuOpen(false);
+    }, 40);
   };
 
   const handleSignOut = async () => {
@@ -491,6 +551,9 @@ export function Navbar({ user }: NavbarProps) {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-zinc-200/80 bg-white/95 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/90">
+      <Suspense fallback={null}>
+        <NavigationObserver onNavigate={handleRouteChange} />
+      </Suspense>
       <div className="mx-auto flex h-16 max-w-full items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Brand Logo & Desktop Nav */}
         <div className="flex items-center gap-3 lg:gap-6 min-w-0">
@@ -546,7 +609,7 @@ export function Navbar({ user }: NavbarProps) {
 
           {user ? (
             /* Authenticated User Menu */
-            <div className="relative shrink-0">
+            <div ref={userMenuRef} className="relative shrink-0">
               <button
                 type="button"
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
@@ -555,7 +618,7 @@ export function Navbar({ user }: NavbarProps) {
                 aria-label="User profile menu"
               >
                 <Avatar
-                  src={user.image}
+                  src={currentImage}
                   name={user.name || user.email}
                   role={user.role as "CLIENT" | "FREELANCER"}
                   userId={user.id}
@@ -572,14 +635,23 @@ export function Navbar({ user }: NavbarProps) {
                   className="absolute right-0 mt-2 w-56 rounded-2xl border border-zinc-200 bg-white p-2 shadow-xl dark:border-zinc-800 dark:bg-zinc-950 z-50 flex flex-col max-h-[calc(100vh-5rem)] overflow-hidden"
                   role="menu"
                 >
-                  <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
-                    <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">
-                      {user.name || "WorkPulse User"}
-                    </p>
-                    <p className="text-[11px] text-zinc-500 truncate">{user.email}</p>
-                    <span className="mt-1 inline-block text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">
-                      Role: {user.role}
-                    </span>
+                  <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 shrink-0 flex items-center gap-2.5">
+                    <Avatar
+                      src={currentImage}
+                      name={user.name || user.email}
+                      role={user.role as "CLIENT" | "FREELANCER"}
+                      userId={user.id}
+                      size="sm"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">
+                        {user.name || "WorkPulse User"}
+                      </p>
+                      <p className="text-[11px] text-zinc-500 truncate">{user.email}</p>
+                      <span className="mt-0.5 inline-block text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">
+                        Role: {user.role}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="py-1 border-b border-zinc-100 dark:border-zinc-800 overflow-y-auto overscroll-contain flex-1 max-h-[60vh] space-y-0.5">
@@ -587,6 +659,7 @@ export function Navbar({ user }: NavbarProps) {
                       <>
                         <Link
                           href="/freelancers"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -596,6 +669,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/dashboard/client"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -605,6 +679,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/contracts"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -614,6 +689,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/messages"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -623,6 +699,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/profile/client"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -632,6 +709,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/jobs/new"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -644,6 +722,7 @@ export function Navbar({ user }: NavbarProps) {
                       <>
                         <Link
                           href="/jobs"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -653,6 +732,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/dashboard/freelancer/proposals"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -662,6 +742,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/clients"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -670,16 +751,8 @@ export function Navbar({ user }: NavbarProps) {
                           <span>Find Clients</span>
                         </Link>
                         <Link
-                          href="/dashboard/freelancer/invitations"
-                          onClick={closeMenu}
-                          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-                          role="menuitem"
-                        >
-                          <span>🤝</span>
-                          <span>Interview Invitations</span>
-                        </Link>
-                        <Link
                           href="/messages"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -689,6 +762,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/contracts"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -698,6 +772,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/dashboard/freelancer/payments"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -707,6 +782,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/jobs/saved"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -716,6 +792,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href="/profile/freelancer"
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -725,6 +802,7 @@ export function Navbar({ user }: NavbarProps) {
                         </Link>
                         <Link
                           href={`/freelancers/${user.id}`}
+                          prefetch={true}
                           onClick={closeMenu}
                           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
                           role="menuitem"
@@ -846,7 +924,7 @@ export function Navbar({ user }: NavbarProps) {
               <div className="pb-3 border-b border-zinc-100 dark:border-zinc-800 px-1 flex items-center justify-between">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <Avatar
-                    src={user.image}
+                    src={currentImage}
                     name={user.name || user.email}
                     role={user.role as "CLIENT" | "FREELANCER"}
                     userId={user.id}

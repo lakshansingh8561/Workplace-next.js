@@ -16,6 +16,11 @@ import dynamic from "next/dynamic";
 import { RazorpayPaymentButton } from "@/components/payments/RazorpayCheckoutButton";
 import { PaymentHistorySection } from "@/components/payments/PaymentHistorySection";
 import { formatDate } from "@/lib/utils";
+import { MilestoneSubmission } from "@/types";
+import { MilestoneSubmissionModal } from "@/components/contracts/MilestoneSubmissionModal";
+import { MilestoneRevisionRequestModal } from "@/components/contracts/MilestoneRevisionRequestModal";
+import { MilestoneDeliverablesViewer } from "@/components/contracts/MilestoneDeliverablesViewer";
+import { Avatar } from "@/components/ui/Avatar";
 
 const FreelancerTimeTrackerWidget = dynamic(
   () =>
@@ -58,6 +63,7 @@ export interface DetailMilestone {
   status: MilestoneStatus;
   isPaid?: boolean;
   paidAt?: string | null;
+  submissions?: MilestoneSubmission[];
   createdAt: string;
 }
 
@@ -109,6 +115,8 @@ export function ContractDetailsView({
   const [milestoneDesc, setMilestoneDesc] = useState("");
   const [milestoneAmount, setMilestoneAmount] = useState("");
   const [milestoneDueDate, setMilestoneDueDate] = useState("");
+  const [submittingMilestone, setSubmittingMilestone] = useState<DetailMilestone | null>(null);
+  const [requestingChangesMilestone, setRequestingChangesMilestone] = useState<DetailMilestone | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
@@ -262,7 +270,7 @@ export function ContractDetailsView({
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Back Link */}
       <div className="mb-6">
         <Link
@@ -368,16 +376,25 @@ export function ContractDetailsView({
 
         {/* Counterparty & Agreed Terms Grid */}
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 rounded-2xl bg-zinc-50 p-4 border border-zinc-100 dark:bg-zinc-800/40 dark:border-zinc-800 text-xs">
-          <div>
-            <span className="text-zinc-500 dark:text-zinc-400 font-medium">Counterparty:</span>
-            <p className="font-bold text-zinc-900 dark:text-white mt-0.5 text-sm">
-              {isClient
-                ? contract.freelancer.name || "Freelancer"
-                : contract.client.name || "Client"}
-            </p>
-            <span className="text-[11px] text-zinc-400">
-              {isClient ? "Assigned Freelancer" : "Project Client"}
-            </span>
+          <div className="flex items-center gap-3">
+            <Avatar
+              src={isClient ? contract.freelancer.image : contract.client.image}
+              name={isClient ? contract.freelancer.name : contract.client.name}
+              role={isClient ? "FREELANCER" : "CLIENT"}
+              userId={isClient ? contract.freelancerId : contract.clientId}
+              size="md"
+            />
+            <div className="min-w-0 flex-1">
+              <span className="text-zinc-500 dark:text-zinc-400 font-medium">Counterparty:</span>
+              <p className="font-bold text-zinc-900 dark:text-white mt-0.5 text-sm truncate">
+                {isClient
+                  ? contract.freelancer.name || "Freelancer"
+                  : contract.client.name || "Client"}
+              </p>
+              <span className="text-[11px] text-zinc-400 block truncate">
+                {isClient ? "Assigned Freelancer" : "Project Client"}
+              </span>
+            </div>
           </div>
 
           <div>
@@ -670,6 +687,8 @@ export function ContractDetailsView({
                               : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800"
                             : milestone.status === "SUBMITTED"
                             ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400 border border-amber-300 dark:border-amber-800"
+                            : milestone.status === "REVISION_REQUESTED"
+                            ? "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-400 border border-orange-300 dark:border-orange-800"
                             : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-400 border border-blue-300 dark:border-blue-800"
                         }`}
                       >
@@ -679,6 +698,8 @@ export function ContractDetailsView({
                             : "✓ Approved"
                           : milestone.status === "SUBMITTED"
                           ? "⏳ In Review"
+                          : milestone.status === "REVISION_REQUESTED"
+                          ? "⚠️ Changes Requested"
                           : "● Active"}
                       </span>
 
@@ -686,24 +707,44 @@ export function ContractDetailsView({
                       {isFreelancer && milestone.status === "ACTIVE" && (
                         <button
                           type="button"
-                          disabled={isPending}
-                          onClick={() => handleSubmitMilestone(milestone.id)}
-                          className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition disabled:opacity-50"
+                          onClick={() => setSubmittingMilestone(milestone)}
+                          className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition active:scale-95"
                         >
-                          {isActionProcessing ? "Submitting..." : "Submit Deliverable"}
+                          Submit Deliverable
                         </button>
                       )}
 
-                      {/* Client Action: Approve Work */}
-                      {isClient && milestone.status === "SUBMITTED" && (
+                      {/* Freelancer Action: Resubmit Deliverable */}
+                      {isFreelancer && milestone.status === "REVISION_REQUESTED" && (
                         <button
                           type="button"
-                          disabled={isPending}
-                          onClick={() => handleApproveMilestone(milestone.id)}
-                          className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition disabled:opacity-50"
+                          onClick={() => setSubmittingMilestone(milestone)}
+                          className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition active:scale-95"
                         >
-                          {isActionProcessing ? "Approving..." : "Approve Milestone"}
+                          Resubmit Deliverable
                         </button>
+                      )}
+
+                      {/* Client Action: Approve or Request Changes */}
+                      {isClient && milestone.status === "SUBMITTED" && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() => setRequestingChangesMilestone(milestone)}
+                            className="inline-flex items-center justify-center rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300 transition"
+                          >
+                            Request Changes
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() => handleApproveMilestone(milestone.id)}
+                            className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition disabled:opacity-50 active:scale-95"
+                          >
+                            {isActionProcessing ? "Approving..." : "Approve Milestone"}
+                          </button>
+                        </div>
                       )}
 
                       {/* Client Action: Pay Approved Milestone with Razorpay */}
@@ -734,6 +775,20 @@ export function ContractDetailsView({
                       )}
                     </div>
                   </div>
+
+                  {/* Milestone Deliverables & Proof Viewer */}
+                  {milestone.submissions && milestone.submissions.length > 0 && (
+                    <MilestoneDeliverablesViewer
+                      submissions={milestone.submissions}
+                      milestoneStatus={milestone.status}
+                      isClient={isClient}
+                      isFreelancer={isFreelancer}
+                      onApprove={() => handleApproveMilestone(milestone.id)}
+                      onRequestChanges={() => setRequestingChangesMilestone(milestone)}
+                      onResubmit={() => setSubmittingMilestone(milestone)}
+                      isProcessing={isActionProcessing}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -761,6 +816,32 @@ export function ContractDetailsView({
           }
           counterpartRole={isClient ? "Freelancer" : "Client"}
           initialReviewData={reviewData}
+        />
+      )}
+
+      {/* Freelancer Milestone Submission Form Modal */}
+      {submittingMilestone && (
+        <MilestoneSubmissionModal
+          isOpen={Boolean(submittingMilestone)}
+          onClose={() => setSubmittingMilestone(null)}
+          milestone={submittingMilestone}
+          contractTitle={contract.title}
+          onSuccess={() => {
+            router.refresh();
+          }}
+        />
+      )}
+
+      {/* Client Revision Request Form Modal */}
+      {requestingChangesMilestone && (
+        <MilestoneRevisionRequestModal
+          isOpen={Boolean(requestingChangesMilestone)}
+          onClose={() => setRequestingChangesMilestone(null)}
+          milestoneId={requestingChangesMilestone.id}
+          milestoneTitle={requestingChangesMilestone.title}
+          onSuccess={() => {
+            router.refresh();
+          }}
         />
       )}
     </div>

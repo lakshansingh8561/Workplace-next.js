@@ -29,13 +29,6 @@ async function ContractsContent({ searchParams }: ContractsPageProps) {
   const where: Prisma.ContractWhereInput =
     user.role === "CLIENT" ? { clientId: user.id } : { freelancerId: user.id };
 
-  if (
-    statusParam &&
-    Object.values(ContractStatus).includes(statusParam as ContractStatus)
-  ) {
-    where.status = statusParam as ContractStatus;
-  }
-
   const rawContracts = await prisma.contract.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -53,6 +46,7 @@ async function ContractsContent({ searchParams }: ContractsPageProps) {
           id: true,
           name: true,
           email: true,
+          image: true,
         },
       },
       freelancer: {
@@ -60,6 +54,7 @@ async function ContractsContent({ searchParams }: ContractsPageProps) {
           id: true,
           name: true,
           email: true,
+          image: true,
         },
       },
       milestones: {
@@ -87,6 +82,8 @@ async function ContractsContent({ searchParams }: ContractsPageProps) {
       hourlyRate: c.hourlyRate,
       status: c.status,
       startDate: c.startDate.toISOString(),
+      counterpartyId: counterparty.id,
+      counterpartyImage: counterparty.image,
       counterpartyName,
       counterpartyRole: isClient ? "Freelancer" : "Client",
       jobId: c.jobId,
@@ -109,7 +106,7 @@ export default function ContractsPage({ searchParams }: ContractsPageProps) {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
           Loading Contracts...
         </div>
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ConversationSummaryDto } from "@/lib/actions/message";
 import { Avatar } from "@/components/ui/Avatar";
 
@@ -17,6 +17,11 @@ export function ConversationList({
 }: ConversationListProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [tabFilter, setTabFilter] = useState<"ALL" | "CONTRACTS" | "PRE_HIRE">("ALL");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const contractCount = conversations.filter(
     (c) => c.type === "CONTRACT" || !c.type
@@ -41,6 +46,7 @@ export function ConversationList({
   });
 
   const formatSnippetTime = (isoString: string) => {
+    if (!mounted) return "";
     try {
       const date = new Date(isoString);
       const now = new Date();

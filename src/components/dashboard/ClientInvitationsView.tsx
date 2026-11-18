@@ -87,7 +87,7 @@ export function ClientInvitationsView({
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Top Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-zinc-200/80 dark:border-zinc-800">
         <div>
@@ -230,6 +230,8 @@ export function ClientInvitationsView({
                     <Avatar
                       src={inv.counterparty.image}
                       name={inv.counterparty.name || "Freelancer"}
+                      role="FREELANCER"
+                      userId={inv.counterparty.id}
                       size="md"
                       className="shrink-0 border border-zinc-200 dark:border-zinc-700 rounded-2xl"
                     />

@@ -96,7 +96,7 @@ export function PublicClientProfileView({
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Top Navigation */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <Link

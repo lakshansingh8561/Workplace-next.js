@@ -95,7 +95,7 @@ export async function acquireDatabaseTimerReservation(
       where: { freelancerId },
     });
     if (deleted.count > 0) {
-      isOrphanRecovered = true;
+      isOrphanRecovered = true;   
     }
 
     // 3. Atomically create the database reservation record
@@ -132,7 +132,7 @@ export async function linkTimeEntryToReservation(
     await tx.activeTimerReservation.updateMany({
       where: { freelancerId },
       data: { timeEntryId },
-    });
+    }); 
   }
 }
 

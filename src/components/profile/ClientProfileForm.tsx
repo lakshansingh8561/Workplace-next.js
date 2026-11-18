@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { updateClientProfileAction, ProfileActionResult } from "@/lib/actions/profile";
 import { calculateClientProfileCompletion } from "@/lib/validations/profile";
+import { ProfilePhotoUpload } from "@/components/profile/ProfilePhotoUpload";
 
 export interface ClientProfileInitialData {
   id: string;
@@ -90,7 +91,7 @@ export function ClientProfileForm({ initialData }: ClientProfileFormProps) {
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Navigation breadcrumbs */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <Link
@@ -203,6 +204,16 @@ export function ClientProfileForm({ initialData }: ClientProfileFormProps) {
           </button>
         </div>
       )}
+
+      {/* Profile Photo / Company Avatar */}
+      <div className="mb-8">
+        <ProfilePhotoUpload
+          initialImage={initialData.image}
+          userName={companyName || name}
+          userRole="CLIENT"
+          userId={initialData.id}
+        />
+      </div>
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="space-y-8">

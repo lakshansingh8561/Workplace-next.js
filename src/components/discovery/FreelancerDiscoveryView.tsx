@@ -46,8 +46,14 @@ export function FreelancerDiscoveryView({
       } else {
         setChatError(res.error || "Unable to start conversation with freelancer.");
       }
-    } catch {
-      setChatError("Failed to initiate chat. Please try again.");
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to initiate chat. Please try again.";
+      setChatError(
+        msg.includes("unexpected response")
+          ? "Server connection interrupted. Please refresh the page and try again."
+          : msg
+      );
     } finally {
       setActiveChatFreelancerId(null);
     }
@@ -118,7 +124,7 @@ export function FreelancerDiscoveryView({
   const freelancers = initialData.freelancers || [];
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-950 dark:text-white">

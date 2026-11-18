@@ -8,7 +8,6 @@ import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
 import { updateProposalStatusAction } from "@/lib/actions/proposal";
 import { HireConfirmationModal } from "@/components/dashboard/HireConfirmationModal";
 import { DeclineReasonModal } from "@/components/dashboard/DeclineReasonModal";
-import { NegotiateProposalModal } from "@/components/dashboard/NegotiateProposalModal";
 
 export interface ReceivedProposalItem {
   id: string;
@@ -55,7 +54,6 @@ export function ClientAllProposalsView({ initialProposals }: ClientAllProposalsV
 
   const [hireModalProposal, setHireModalProposal] = useState<ReceivedProposalItem | null>(null);
   const [declineModalProposal, setDeclineModalProposal] = useState<ReceivedProposalItem | null>(null);
-  const [negotiateModalProposal, setNegotiateModalProposal] = useState<ReceivedProposalItem | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const handleStartChat = async (freelancerId: string, jobId: string) => {
@@ -143,7 +141,7 @@ export function ClientAllProposalsView({ initialProposals }: ClientAllProposalsV
   });
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-zinc-200/80 dark:border-zinc-800">
         <div>
@@ -361,13 +359,6 @@ export function ClientAllProposalsView({ initialProposals }: ClientAllProposalsV
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setNegotiateModalProposal(proposal)}
-                        className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 transition"
-                      >
-                        Negotiate Rate
-                      </button>
-                      <button
-                        type="button"
                         onClick={() => setDeclineModalProposal(proposal)}
                         className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-rose-400 transition"
                       >
@@ -417,22 +408,6 @@ export function ClientAllProposalsView({ initialProposals }: ClientAllProposalsV
           }'s proposal for "${declineModalProposal.job.title}"?`}
           confirmButtonLabel="Decline Proposal"
           showReasonInput={false}
-        />
-      )}
-
-      {negotiateModalProposal && (
-        <NegotiateProposalModal
-          isOpen={Boolean(negotiateModalProposal)}
-          onClose={() => setNegotiateModalProposal(null)}
-          proposalId={negotiateModalProposal.id}
-          freelancerName={negotiateModalProposal.freelancer.name || "Freelancer"}
-          currentBidAmount={negotiateModalProposal.bidAmount}
-          jobType={negotiateModalProposal.job.type}
-          jobTitle={negotiateModalProposal.job.title}
-          onSuccess={() => {
-            setToastMessage("Rate negotiation offer sent to freelancer.");
-            router.refresh();
-          }}
         />
       )}
     </div>

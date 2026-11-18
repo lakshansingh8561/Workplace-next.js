@@ -69,7 +69,7 @@ export default function FreelancerPaymentsPage({
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16 text-center text-xs text-zinc-500 animate-pulse">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center text-xs text-zinc-500 animate-pulse">
           Loading verified earnings and payment records...
         </div>
       }

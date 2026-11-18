@@ -105,6 +105,10 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
         .digest("hex");
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
+      await prisma.emailVerificationToken.deleteMany({
+        where: { email: newUser.email },
+      });
+
       await prisma.emailVerificationToken.create({
         data: {
           email: newUser.email,

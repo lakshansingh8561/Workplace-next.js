@@ -16,24 +16,10 @@ const HireConfirmationModal = dynamic(
     ),
   { ssr: false }
 );
-const SendInvitationModal = dynamic(
-  () =>
-    import("@/components/dashboard/SendInvitationModal").then(
-      (m) => m.SendInvitationModal
-    ),
-  { ssr: false }
-);
 const DeclineReasonModal = dynamic(
   () =>
     import("@/components/dashboard/DeclineReasonModal").then(
       (m) => m.DeclineReasonModal
-    ),
-  { ssr: false }
-);
-const NegotiateProposalModal = dynamic(
-  () =>
-    import("@/components/dashboard/NegotiateProposalModal").then(
-      (m) => m.NegotiateProposalModal
     ),
   { ssr: false }
 );
@@ -98,9 +84,7 @@ export function ClientProposalReview({
 
   // Modals state
   const [hireModalProposal, setHireModalProposal] = useState<ReviewProposalItem | null>(null);
-  const [inviteModalProposal, setInviteModalProposal] = useState<ReviewProposalItem | null>(null);
   const [declineModalProposal, setDeclineModalProposal] = useState<ReviewProposalItem | null>(null);
-  const [negotiateModalProposal, setNegotiateModalProposal] = useState<ReviewProposalItem | null>(null);
 
   const isHourly = job.type.toUpperCase() === "HOURLY";
 
@@ -222,7 +206,7 @@ export function ClientProposalReview({
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Navigation & Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -586,32 +570,10 @@ export function ClientProposalReview({
                           <span>💬</span>
                           <span>{isProcessingThis ? "Opening Chat..." : "Chat Candidate"}</span>
                         </button>
-
-                        {/* Send Interview Invitation Button */}
-                        {jobStatus === "OPEN" && (
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            onClick={() => setInviteModalProposal(proposal)}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/70 px-3.5 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60 transition disabled:opacity-50"
-                          >
-                            <span>🤝</span>
-                            <span>Invite to Interview</span>
-                          </button>
-                        )}
                       </div>
 
                       {/* Decision Action Buttons */}
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={isPending}
-                          onClick={() => setNegotiateModalProposal(proposal)}
-                          className="inline-flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50/80 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 transition disabled:opacity-50"
-                        >
-                          <span>💬</span>
-                          <span>Negotiate Rate</span>
-                        </button>
                         <button
                           type="button"
                           disabled={isPending}
@@ -691,30 +653,6 @@ export function ClientProposalReview({
         />
       )}
 
-      {/* Send Interview Invitation Modal */}
-      {inviteModalProposal && (
-        <SendInvitationModal
-          isOpen={Boolean(inviteModalProposal)}
-          onClose={() => setInviteModalProposal(null)}
-          jobId={job.id}
-          jobTitle={job.title}
-          freelancerId={inviteModalProposal.freelancerId}
-          freelancerName={
-            inviteModalProposal.freelancer.name ||
-            (inviteModalProposal.freelancer.email ? inviteModalProposal.freelancer.email.split("@")[0] : "Freelancer")
-          }
-          onSuccess={(invitationId, conversationId) => {
-            setInviteModalProposal(null);
-            setSuccessToast({
-              message: "Interview invitation sent successfully! Discussion thread opened.",
-              link: `/messages?conversationId=${conversationId}`,
-              linkText: "Open Chat →",
-            });
-            router.refresh();
-          }}
-        />
-      )}
-
       {/* Decline Proposal Confirmation Modal */}
       {declineModalProposal && (
         <DeclineReasonModal
@@ -728,28 +666,6 @@ export function ClientProposalReview({
           }'s proposal for "${job.title}"? This candidate will be notified.`}
           confirmButtonLabel="Decline Proposal"
           showReasonInput={false}
-        />
-      )}
-
-      {/* Negotiate Rate Modal */}
-      {negotiateModalProposal && (
-        <NegotiateProposalModal
-          isOpen={Boolean(negotiateModalProposal)}
-          onClose={() => setNegotiateModalProposal(null)}
-          proposalId={negotiateModalProposal.id}
-          freelancerName={
-            negotiateModalProposal.freelancer.name ||
-            (negotiateModalProposal.freelancer.email ? negotiateModalProposal.freelancer.email.split("@")[0] : "Freelancer")
-          }
-          currentBidAmount={negotiateModalProposal.bidAmount}
-          jobType={job.type}
-          jobTitle={job.title}
-          onSuccess={() => {
-            setSuccessToast({
-              message: "Rate negotiation offer sent to freelancer successfully!",
-            });
-            router.refresh();
-          }}
         />
       )}
     </div>

@@ -70,7 +70,7 @@ export default function ClientAllProposalsPage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-6xl px-4 py-16 text-center text-sm text-zinc-500">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
           Loading client proposals...
         </div>
       }

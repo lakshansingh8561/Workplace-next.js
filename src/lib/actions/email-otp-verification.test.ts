@@ -8,6 +8,7 @@ import {
 } from "./auth-recovery";
 import * as emailModule from "@/lib/email";
 import * as rateLimitModule from "@/lib/rate-limit";
+import * as sessionModule from "@/lib/session";
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -166,7 +167,7 @@ describe("Email OTP Verification Workflow", () => {
 
       const result = await verifyEmailOtpAction({ email: "test@example.com", otp: "123456" });
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Too many verification attempts");
+      expect(result.error).toContain("Too many failed attempts");
     });
 
     it("should reject invalid OTP code when token hash does not match", async () => {
@@ -181,11 +182,11 @@ describe("Email OTP Verification Workflow", () => {
 
       const result = await verifyEmailOtpAction({ email: "test@example.com", otp: "999999" });
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Invalid verification code");
+      expect(result.error).toBe("Invalid verification code. Please try again.");
     });
 
     it("should reject expired OTP code and clean it up", async () => {
-      let deletedTokenId: string | null = null;
+      let deletedTokens: boolean = false;
       (prisma.$transaction as any).mockImplementationOnce(async (callback: any) => {
         const tx = {
           emailVerificationToken: {
@@ -194,9 +195,9 @@ describe("Email OTP Verification Workflow", () => {
               email: "test@example.com",
               expiresAt: new Date(Date.now() - 1000), // expired 1s ago
             }),
-            delete: vi.fn().mockImplementation((args: any) => {
-              deletedTokenId = args.where.id;
-              return {};
+            deleteMany: vi.fn().mockImplementation(() => {
+              deletedTokens = true;
+              return { count: 1 };
             }),
           },
         };
@@ -206,8 +207,8 @@ describe("Email OTP Verification Workflow", () => {
       const result = await verifyEmailOtpAction({ email: "test@example.com", otp: "123456" });
       expect(result.success).toBe(false);
       expect(result.expired).toBe(true);
-      expect(result.error).toContain("expired");
-      expect(deletedTokenId).toBe("tok-expired");
+      expect(result.error).toBe("Verification code has expired. Please request a new code.");
+      expect(deletedTokens).toBe(true);
     });
 
     it("should mark user emailVerified, invalidate tokens, and return success on valid OTP", async () => {
@@ -254,6 +255,153 @@ describe("Email OTP Verification Workflow", () => {
       expect(updatedUser.where.id).toBe("user-target");
       expect(updatedUser.data.emailVerified).toBeInstanceOf(Date);
       expect(deletedTokensForEmail).toBe("test@example.com");
+    });
+  });
+
+  describe("Regression & Edge Case Scenarios", () => {
+    it("Test A: Incorrect OTP followed by correct OTP does not delete token prematurely and succeeds on correct entry", async () => {
+      const correctOtp = "789123";
+      const correctHash = crypto.createHash("sha256").update(correctOtp).digest("hex");
+
+      // 1. Enter incorrect OTP: Token is NOT deleted, returns invalid code error
+      (prisma.$transaction as any).mockImplementationOnce(async (callback: any) => {
+        const tx = {
+          emailVerificationToken: {
+            findFirst: vi.fn().mockResolvedValue(null),
+          },
+        };
+        return callback(tx);
+      });
+
+      const attempt1 = await verifyEmailOtpAction({ email: "retry@example.com", otp: "000000" });
+      expect(attempt1.success).toBe(false);
+      expect(attempt1.error).toBe("Invalid verification code. Please try again.");
+
+      // 2. Clear incorrect OTP and enter correct OTP: Token found, verification succeeds
+      let updatedUser: any = null;
+      (prisma.$transaction as any).mockImplementationOnce(async (callback: any) => {
+        const tx = {
+          emailVerificationToken: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "tok-correct",
+              email: "retry@example.com",
+              tokenHash: correctHash,
+              expiresAt: new Date(Date.now() + 600000),
+            }),
+            deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+          },
+          user: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: "user-retry",
+              email: "retry@example.com",
+              emailVerified: null,
+            }),
+            update: vi.fn().mockImplementation((args: any) => {
+              updatedUser = args;
+              return { id: "user-retry", emailVerified: args.data.emailVerified };
+            }),
+          },
+        };
+        return callback(tx);
+      });
+
+      const attempt2 = await verifyEmailOtpAction({ email: "retry@example.com", otp: correctOtp });
+      expect(attempt2.success).toBe(true);
+      expect(attempt2.message).toContain("verified successfully");
+      expect(updatedUser.data.emailVerified).toBeInstanceOf(Date);
+    });
+
+    it("Test B: Multiple incorrect attempts within rate limit followed by correct OTP", async () => {
+      const correctOtp = "123789";
+      const correctHash = crypto.createHash("sha256").update(correctOtp).digest("hex");
+
+      // 3 incorrect attempts
+      for (let i = 0; i < 3; i++) {
+        (prisma.$transaction as any).mockImplementationOnce(async (callback: any) => {
+          const tx = {
+            emailVerificationToken: {
+              findFirst: vi.fn().mockResolvedValue(null),
+            },
+          };
+          return callback(tx);
+        });
+
+        const failed = await verifyEmailOtpAction({ email: "multi@example.com", otp: `11111${i}` });
+        expect(failed.success).toBe(false);
+        expect(failed.error).toBe("Invalid verification code. Please try again.");
+      }
+
+      // Successful 4th attempt with correct OTP
+      (prisma.$transaction as any).mockImplementationOnce(async (callback: any) => {
+        const tx = {
+          emailVerificationToken: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "tok-multi",
+              email: "multi@example.com",
+              tokenHash: correctHash,
+              expiresAt: new Date(Date.now() + 600000),
+            }),
+            deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+          },
+          user: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: "user-multi",
+              email: "multi@example.com",
+              emailVerified: null,
+            }),
+            update: vi.fn().mockResolvedValue({ id: "user-multi", emailVerified: new Date() }),
+          },
+        };
+        return callback(tx);
+      });
+
+      const success = await verifyEmailOtpAction({ email: "multi@example.com", otp: correctOtp });
+      expect(success.success).toBe(true);
+    });
+
+    it("Test D: Resend OTP creates fresh token and invalidates prior OTP", async () => {
+      (prisma.user.findUnique as any).mockResolvedValueOnce({
+        id: "user-resend",
+        email: "resend@example.com",
+        emailVerified: null,
+      });
+
+      let oldTokensDeleted = false;
+      (prisma.$transaction as any).mockImplementationOnce(async (callback: any) => {
+        const tx = {
+          emailVerificationToken: {
+            deleteMany: vi.fn().mockImplementation(() => {
+              oldTokensDeleted = true;
+              return { count: 1 };
+            }),
+            create: vi.fn().mockResolvedValue({ id: "new-token" }),
+          },
+        };
+        return callback(tx);
+      });
+
+      const resendRes = await sendEmailVerificationOtpAction({ email: "resend@example.com" });
+      expect(resendRes.success).toBe(true);
+      expect(oldTokensDeleted).toBe(true);
+    });
+
+    it("Test E: Cross-user verification is strictly blocked when logged in as User A and verifying User B", async () => {
+      vi.spyOn(sessionModule, "getCurrentUser").mockResolvedValueOnce({
+        id: "user-A",
+        name: "User A",
+        email: "usera@example.com",
+        role: "CLIENT" as any,
+        roleSelected: true,
+        sessionVersion: 1,
+      });
+
+      const result = await verifyEmailOtpAction({
+        email: "userb@example.com",
+        otp: "123456",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("You cannot verify an email address belonging to another user.");
     });
   });
 });

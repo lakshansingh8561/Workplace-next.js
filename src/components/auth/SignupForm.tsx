@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { signOut } from "next-auth/react";
 import { registerUser } from "@/lib/actions/auth";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 
@@ -25,9 +26,17 @@ export function SignupForm() {
     setFieldErrors({});
 
     startTransition(async () => {
+      // Clear any prior authenticated session to prevent stale cross-user session collisions
+      try {
+        await signOut({ redirect: false });
+      } catch {
+        // Safe fallback if unauthenticated
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
       const result = await registerUser({
         name,
-        email,
+        email: cleanEmail,
         password,
         role,
       });
@@ -38,8 +47,16 @@ export function SignupForm() {
           setFieldErrors(result.fieldErrors);
         }
       } else {
+        try {
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("workpulse_verify_email", cleanEmail);
+            sessionStorage.setItem("workpulse_verify_role", role);
+          }
+        } catch {
+          // Ignore storage quota/permission restrictions
+        }
         router.push(
-          `/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}&role=${role}`
+          `/verify-email?email=${encodeURIComponent(cleanEmail)}&role=${role}`
         );
       }
     });

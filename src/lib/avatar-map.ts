@@ -24,7 +24,7 @@ export const CLIENT_DEMO_IMAGES: readonly string[] = [
 export const FREELANCER_DEMO_IMAGES: readonly string[] = [
   "/images/freelancers/freelancer1.jpg",
   "/images/freelancers/freelancer2.jfif",
-  "/images/freelancers/freelancer3.jfif",
+  "/images/freelancers/freelancer3.jfif", 
   "/images/freelancers/freelancer4.jfif",
   "/images/freelancers/freelancer5.jfif",
 ] as const;
@@ -58,7 +58,13 @@ export function getDeterministicAvatar(
   roleOverride?: "CLIENT" | "FREELANCER"
 ): string {
   // 1. Real uploaded profile image takes strict precedence
-  if (user?.image && typeof user.image === "string" && user.image.trim().length > 0) {
+  if (
+    user?.image &&
+    typeof user.image === "string" &&
+    user.image.trim().length > 0 &&
+    user.image.trim() !== "null" &&
+    user.image.trim() !== "undefined"
+  ) {
     return user.image.trim();
   }
 
@@ -69,8 +75,13 @@ export function getDeterministicAvatar(
 
   const targetList = isFreelancer ? FREELANCER_DEMO_IMAGES : CLIENT_DEMO_IMAGES;
 
-  // 3. Deterministic key: use user ID if available, otherwise name or companyName
-  const seedKey = user?.id || user?.name || user?.companyName || (isFreelancer ? "freelancer-default" : "client-default");
+  // 3. Deterministic key: use user ID if available, otherwise name or companyName (sanitized & lowercased for stability)
+  const rawSeed =
+    user?.id ||
+    user?.name ||
+    user?.companyName ||
+    (isFreelancer ? "freelancer-default" : "client-default");
+  const seedKey = String(rawSeed).trim().toLowerCase();
   const index = stableHash(seedKey) % targetList.length;
 
   return targetList[index];

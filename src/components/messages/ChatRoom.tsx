@@ -7,8 +7,6 @@ import {
   sendMessageAction,
   ChatMessageDto,
 } from "@/lib/actions/message";
-import { respondToInvitationAction } from "@/lib/actions/invitation";
-import { DeclineReasonModal } from "@/components/dashboard/DeclineReasonModal";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAppDispatch, useAppSelector } from "@/lib/store";
 import {
@@ -75,10 +73,6 @@ export function ChatRoom({
       dispatch(setActiveConversationId(null));
     };
   }, [conversationId, dispatch]);
-
-  // Decline invitation modal state
-  const [isDeclineModalOpen, setIsDeclineModalOpen] = useState(false);
-  const [isInvitationActionPending, startInvitationTransition] = useTransition();
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -247,67 +241,6 @@ export function ChatRoom({
     }
   };
 
-  // Accept interview invitation directly from chat header
-  const handleAcceptInterview = () => {
-    if (!conversation?.invitation) return;
-    const invId = conversation.invitation.id;
-
-    startInvitationTransition(async () => {
-      const res = await respondToInvitationAction({
-        invitationId: invId,
-        action: "ACCEPT",
-      });
-
-      if (!res.success) {
-        setErrorMessage(res.error || "Failed to accept interview invitation.");
-        return;
-      }
-
-      setConversation((prev) =>
-        prev && prev.invitation
-          ? {
-              ...prev,
-              invitation: { ...prev.invitation, status: "ACCEPTED" },
-            }
-          : prev
-      );
-
-      setActionSuccess("Interview invitation accepted! Discussion thread active.");
-    });
-  };
-
-  // Confirm decline interview invitation
-  const handleConfirmDeclineInterview = (reason?: string) => {
-    if (!conversation?.invitation) return;
-    const invId = conversation.invitation.id;
-
-    startInvitationTransition(async () => {
-      const res = await respondToInvitationAction({
-        invitationId: invId,
-        action: "DECLINE",
-        reason,
-      });
-
-      if (!res.success) {
-        setErrorMessage(res.error || "Failed to decline interview invitation.");
-        setIsDeclineModalOpen(false);
-        return;
-      }
-
-      setConversation((prev) =>
-        prev && prev.invitation
-          ? {
-              ...prev,
-              invitation: { ...prev.invitation, status: "DECLINED" },
-            }
-          : prev
-      );
-
-      setActionSuccess("Interview invitation declined.");
-      setIsDeclineModalOpen(false);
-    });
-  };
-
   const formatMessageTime = (dateStr: string) => {
     try {
       const date = new Date(dateStr);
@@ -466,46 +399,15 @@ export function ChatRoom({
           )}
         </div>
 
-        {/* Pre-Hire Context Banner (Invitation & Hiring shortcuts) */}
+        {/* Pre-Hire Context Banner (Discussion & Hiring shortcuts) */}
         {isPreHire && conversation && (
           <div className="px-4 sm:px-6 py-2 bg-indigo-50/60 dark:bg-indigo-950/30 border-t border-indigo-100/60 dark:border-indigo-900/40 flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-200 font-medium">
-              <span>🤝</span>
-              <span>
-                {conversation.invitation?.status === "PENDING"
-                  ? "Interview Invitation: Pending Response"
-                  : conversation.invitation?.status === "ACCEPTED"
-                  ? "Interview Accepted — Coordinate candidate details below."
-                  : conversation.invitation?.status === "DECLINED"
-                  ? "Interview Invitation was declined."
-                  : "Pre-hire discussion regarding project requirements."}
-              </span>
+              <span>💬</span>
+              <span>Pre-hire discussion regarding project scope and requirements.</span>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* If Freelancer & invitation is PENDING: quick accept/decline buttons */}
-              {conversation.invitation?.status === "PENDING" &&
-                conversation.counterparty.role === "CLIENT" && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={isInvitationActionPending}
-                      onClick={() => setIsDeclineModalOpen(true)}
-                      className="px-2.5 py-1 rounded-lg border border-zinc-300 bg-white text-[11px] font-semibold text-rose-600 hover:bg-rose-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-rose-400 transition disabled:opacity-50"
-                    >
-                      Decline
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isInvitationActionPending}
-                      onClick={handleAcceptInterview}
-                      className="px-3 py-1 rounded-lg bg-emerald-600 text-[11px] font-bold text-white hover:bg-emerald-500 transition disabled:opacity-50"
-                    >
-                      {isInvitationActionPending ? "Accepting..." : "Accept Interview"}
-                    </button>
-                  </div>
-                )}
-
               {/* If Client: direct shortcut to Review Proposals & Hire */}
               {conversation.counterparty.role === "FREELANCER" && conversation.jobId && (
                 <Link
@@ -792,20 +694,6 @@ export function ChatRoom({
           </div>
         </form>
       </div>
-
-      {/* Decline Interview Modal */}
-      {isDeclineModalOpen && (
-        <DeclineReasonModal
-          isOpen={isDeclineModalOpen}
-          onClose={() => setIsDeclineModalOpen(false)}
-          onConfirm={handleConfirmDeclineInterview}
-          isPending={isInvitationActionPending}
-          title="Decline Interview Invitation"
-          description="Are you sure you want to decline this interview request? You can optionally provide a reason for the client."
-          confirmButtonLabel="Decline Interview"
-          showReasonInput={true}
-        />
-      )}
     </div>
   );
 }

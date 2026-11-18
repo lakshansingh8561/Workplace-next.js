@@ -1015,9 +1015,19 @@ export async function getFreelancerProposals(params: {
     // 1. Calculate live status counts strictly for the authenticated freelancer
     const [totalAll, totalPending, totalAccepted, totalRejected] = await Promise.all([
       prisma.proposal.count({ where: { freelancerId: user.id } }),
-      prisma.proposal.count({ where: { freelancerId: user.id, status: "PENDING" } }),
+      prisma.proposal.count({
+        where: {
+          freelancerId: user.id,
+          status: { in: ["PENDING", "UNDER_REVIEW"] },
+        },
+      }),
       prisma.proposal.count({ where: { freelancerId: user.id, status: "ACCEPTED" } }),
-      prisma.proposal.count({ where: { freelancerId: user.id, status: "REJECTED" } }),
+      prisma.proposal.count({
+        where: {
+          freelancerId: user.id,
+          status: { in: ["REJECTED", "WITHDRAWN"] },
+        },
+      }),
     ]);
 
     // 2. Build filtered where clause
@@ -1026,12 +1036,14 @@ export async function getFreelancerProposals(params: {
     };
 
     const normalizedStatus = params.status?.toUpperCase();
-    if (
-      normalizedStatus &&
-      normalizedStatus !== "ALL" &&
-      ["PENDING", "ACCEPTED", "REJECTED"].includes(normalizedStatus)
-    ) {
-      where.status = normalizedStatus as "PENDING" | "ACCEPTED" | "REJECTED";
+    if (normalizedStatus && normalizedStatus !== "ALL") {
+      if (normalizedStatus === "PENDING" || normalizedStatus === "UNDER_REVIEW") {
+        where.status = { in: ["PENDING", "UNDER_REVIEW"] };
+      } else if (normalizedStatus === "ACCEPTED") {
+        where.status = "ACCEPTED";
+      } else if (normalizedStatus === "REJECTED" || normalizedStatus === "DECLINED") {
+        where.status = { in: ["REJECTED", "WITHDRAWN"] };
+      }
     }
 
     const searchQuery = params.search?.trim();

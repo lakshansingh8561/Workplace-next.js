@@ -446,6 +446,10 @@ export async function updateJobStatusAction(
 
     invalidateJobFilterCache();
     revalidatePath("/dashboard/client");
+    revalidatePath("/dashboard/client", "page");
+    revalidatePath("/dashboard/client/proposals");
+    revalidatePath("/dashboard/freelancer");
+    revalidatePath("/dashboard/freelancer/proposals");
     revalidatePath("/jobs");
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath(`/dashboard/client/jobs/${jobId}/proposals`);

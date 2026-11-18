@@ -190,7 +190,6 @@ async function ClientDashboardContent({
 
   return (
     <ClientDashboardView
-      key={`${statusParam || "ALL"}-${searchQuery}-${page}-${totalJobs}-${jobs[0]?.id || "empty"}`}
       jobs={jobs}
       totalJobs={totalJobs}
       currentPage={page}
@@ -245,7 +244,7 @@ export default function ClientDashboardPage({
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
           Loading Client Dashboard...
         </div>
       }

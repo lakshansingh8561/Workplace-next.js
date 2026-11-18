@@ -120,40 +120,50 @@ export function DirectHireModal({
     }
 
     startTransition(async () => {
-      const res = await createDirectHiringOfferAction({
-        freelancerId,
-        jobId: projectMode === "EXISTING" ? selectedJobId || undefined : undefined,
-        title: title.trim(),
-        description: description.trim(),
-        type: paymentType,
-        amount: parsedAmount,
-        duration: duration.trim() || undefined,
-        startDate: startDate || undefined,
-        message: message.trim() || undefined,
-        milestones:
-          paymentType === "FIXED"
-            ? milestones.map((m) => ({
-                title: m.title.trim(),
-                description: m.description.trim() || undefined,
-                amount: parseFloat(m.amount) || parsedAmount,
-                dueDate: m.dueDate || undefined,
-              }))
-            : [],
-      });
+      try {
+        const res = await createDirectHiringOfferAction({
+          freelancerId,
+          jobId: projectMode === "EXISTING" ? selectedJobId || undefined : undefined,
+          title: title.trim(),
+          description: description.trim(),
+          type: paymentType,
+          amount: parsedAmount,
+          duration: duration.trim() || undefined,
+          startDate: startDate || undefined,
+          message: message.trim() || undefined,
+          milestones:
+            paymentType === "FIXED"
+              ? milestones.map((m) => ({
+                  title: m.title.trim(),
+                  description: m.description.trim() || undefined,
+                  amount: parseFloat(m.amount) || parsedAmount,
+                  dueDate: m.dueDate || undefined,
+                }))
+              : [],
+        });
 
-      if (!res.success) {
-        setError(res.error || "Failed to send hiring offer.");
-        return;
-      }
+        if (!res.success) {
+          setError(res.error || "Failed to send hiring offer.");
+          return;
+        }
 
-      if (onSuccess && res.offerId) {
-        onSuccess(res.offerId, res.conversationId);
-      } else if (res.conversationId) {
-        router.push(`/messages?conversationId=${res.conversationId}`);
-      } else {
-        router.push("/dashboard/client");
+        if (onSuccess && res.offerId) {
+          onSuccess(res.offerId, res.conversationId);
+        } else if (res.conversationId) {
+          router.push(`/messages?conversationId=${res.conversationId}`);
+        } else {
+          router.push("/dashboard/client");
+        }
+        onClose();
+      } catch (err: unknown) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to send hiring offer.";
+        setError(
+          msg.includes("unexpected response")
+            ? "Server connection was interrupted. Please refresh and try again."
+            : msg
+        );
       }
-      onClose();
     });
   };
 

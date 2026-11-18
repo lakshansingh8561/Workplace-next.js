@@ -127,7 +127,7 @@ export function MessagingLayout({
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
       {resolutionError && (
         <div className="mb-4 rounded-2xl bg-rose-50 border border-rose-200 p-4 text-xs font-semibold text-rose-800 dark:bg-rose-950/40 dark:border-rose-900 dark:text-rose-300 flex items-center justify-between">
           <div className="flex items-center gap-2">

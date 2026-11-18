@@ -51,7 +51,7 @@ export const GetOrCreatePreHireConversationSchema = z.object({
     .trim()
     .regex(OBJECT_ID_REGEX, "Invalid Job ID format"),
   freelancerId: z
-    .string()
+    .string()                
     .trim()
     .regex(OBJECT_ID_REGEX, "Invalid Freelancer ID format"),
 });

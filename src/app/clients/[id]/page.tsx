@@ -150,7 +150,7 @@ export default function ClientProfilePage({ params }: ClientProfilePageProps) {
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 pb-16">
       <Suspense
         fallback={
-          <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
+          <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
             <div className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent mb-3" />
             <p>Loading Company Profile...</p>
           </div>

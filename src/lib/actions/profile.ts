@@ -462,3 +462,108 @@ export async function getClientPublicProfile(userId: string) {
     return null;
   }
 }
+
+/**
+ * Server action to update the user's profile image directly in the database.
+ */
+export async function updateProfilePhotoAction(
+  imageUrl: string
+): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+  const sessionUser = await getCurrentUser();
+
+  if (!sessionUser) {
+    return {
+      success: false,
+      error: "You must be signed in to update your profile photo.",
+    };
+  }
+
+  if (!imageUrl || typeof imageUrl !== "string" || imageUrl.trim().length === 0) {
+    return {
+      success: false,
+      error: "Invalid image URL provided.",
+    };
+  }
+
+  try {
+    const updated = await prisma.user.update({
+      where: { id: sessionUser.id },
+      data: { image: imageUrl.trim() },
+      select: { id: true, image: true },
+    });
+
+    revalidatePath("/");
+    revalidatePath("/dashboard/client");
+    revalidatePath("/dashboard/freelancer");
+    revalidatePath("/dashboard/freelancer/proposals");
+    revalidatePath("/profile/client");
+    revalidatePath("/profile/freelancer");
+    revalidatePath(`/clients/${sessionUser.id}`);
+    revalidatePath(`/freelancers/${sessionUser.id}`);
+    revalidatePath("/jobs");
+    revalidatePath("/freelancers");
+    revalidatePath("/clients");
+    revalidatePath("/contracts");
+    revalidatePath("/messages");
+
+    return {
+      success: true,
+      imageUrl: updated.image || undefined,
+    };
+  } catch (error) {
+    console.error("[WorkPulse Update Profile Photo Action Error]:", error);
+    return {
+      success: false,
+      error: "Failed to update profile photo in database.",
+    };
+  }
+}
+
+/**
+ * Server action to remove the user's custom profile image and revert to deterministic avatar.
+ */
+export async function removeProfilePhotoAction(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  const sessionUser = await getCurrentUser();
+
+  if (!sessionUser) {
+    return {
+      success: false,
+      error: "You must be signed in to remove your profile photo.",
+    };
+  }
+
+  try {
+    await prisma.user.update({
+      where: { id: sessionUser.id },
+      data: { image: null },
+    });
+
+    revalidatePath("/");
+    revalidatePath("/dashboard/client");
+    revalidatePath("/dashboard/freelancer");
+    revalidatePath("/dashboard/freelancer/proposals");
+    revalidatePath("/profile/client");
+    revalidatePath("/profile/freelancer");
+    revalidatePath(`/clients/${sessionUser.id}`);
+    revalidatePath(`/freelancers/${sessionUser.id}`);
+    revalidatePath("/jobs");
+    revalidatePath("/freelancers");
+    revalidatePath("/clients");
+    revalidatePath("/contracts");
+    revalidatePath("/messages");
+
+    return {
+      success: true,
+    };
+  } catch (error) {
+    console.error("[WorkPulse Remove Profile Photo Action Error]:", error);
+    return {
+      success: false,
+      error: "Failed to remove profile photo from database.",
+    };
+  }
+}
+

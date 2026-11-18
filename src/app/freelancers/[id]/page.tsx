@@ -81,7 +81,7 @@ export default function FreelancerProfilePage({ params }: FreelancerProfilePageP
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-16 text-center text-sm text-zinc-500">
           Loading Freelancer Profile...
         </div>
       }

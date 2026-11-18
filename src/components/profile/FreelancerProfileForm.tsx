@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { updateFreelancerProfileAction, ProfileActionResult } from "@/lib/actions/profile";
+import { ProfilePhotoUpload } from "@/components/profile/ProfilePhotoUpload";
 import {
   calculateFreelancerProfileCompletion,
   PortfolioProjectInput,
@@ -411,7 +412,7 @@ export function FreelancerProfileForm({ initialData }: FreelancerProfileFormProp
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Navigation breadcrumbs */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <Link
@@ -527,6 +528,16 @@ export function FreelancerProfileForm({ initialData }: FreelancerProfileFormProp
           </button>
         </div>
       )}
+
+      {/* Profile Photo Upload */}
+      <div className="mb-8">
+        <ProfilePhotoUpload
+          initialImage={initialData.image}
+          userName={name}
+          userRole="FREELANCER"
+          userId={initialData.id}
+        />
+      </div>
 
       {/* Main Form */}
       <form onSubmit={handleSubmit} className="space-y-8">

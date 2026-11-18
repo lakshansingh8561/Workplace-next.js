@@ -248,7 +248,39 @@ export interface Proposal {
 }
 
 export type ContractStatus = "ACTIVE" | "PAUSED" | "COMPLETED" | "TERMINATED";
-export type MilestoneStatus = "PENDING" | "ACTIVE" | "SUBMITTED" | "APPROVED";
+export type MilestoneStatus = "PENDING" | "ACTIVE" | "SUBMITTED" | "APPROVED" | "REVISION_REQUESTED";
+
+export interface MilestoneSubmissionAttachment {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+  storageProvider?: string | null;
+  createdAt: string | Date;
+}
+
+export interface MilestoneSubmissionLink {
+  id: string;
+  title?: string | null;
+  url: string;
+  createdAt: string | Date;
+}
+
+export interface MilestoneSubmission {
+  id: string;
+  freelancerId: string;
+  description: string;
+  status: string; // SUBMITTED, APPROVED, REVISION_REQUESTED
+  submittedAt: string | Date;
+  reviewedAt?: string | Date | null;
+  reviewerId?: string | null;
+  revisionFeedback?: string | null;
+  attachments: MilestoneSubmissionAttachment[];
+  links: MilestoneSubmissionLink[];
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
 
 export interface ContractMilestone {
   id: string;
@@ -258,6 +290,9 @@ export interface ContractMilestone {
   amount: number;
   dueDate?: string | null;
   status: MilestoneStatus;
+  isPaid?: boolean;
+  paidAt?: string | Date | null;
+  submissions?: MilestoneSubmission[];
   createdAt: string | Date;
   updatedAt?: string | Date;
 }

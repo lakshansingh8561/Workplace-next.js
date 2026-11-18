@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ContractStatus, PaymentType } from "@prisma/client";
 import { formatDate } from "@/lib/utils";
+import { Avatar } from "@/components/ui/Avatar";
 
 export interface ContractListItem {
   id: string;
@@ -14,6 +15,8 @@ export interface ContractListItem {
   hourlyRate?: number | null;
   status: ContractStatus;
   startDate: string;
+  counterpartyId?: string;
+  counterpartyImage?: string | null;
   counterpartyName: string;
   counterpartyRole: "Client" | "Freelancer";
   jobId: string;
@@ -37,18 +40,39 @@ export function ContractsListView({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState<string>(
+    currentStatus?.toUpperCase() || "ALL"
+  );
+
+  useEffect(() => {
+    setSelectedStatus(currentStatus?.toUpperCase() || "ALL");
+  }, [currentStatus]);
+
+  const statusCounts = {
+    ALL: contracts.length,
+    ACTIVE: contracts.filter((c) => c.status === "ACTIVE").length,
+    PAUSED: contracts.filter((c) => c.status === "PAUSED").length,
+    COMPLETED: contracts.filter((c) => c.status === "COMPLETED").length,
+    TERMINATED: contracts.filter((c) => c.status === "TERMINATED").length,
+  };
 
   const handleStatusFilter = (status: string) => {
+    setSelectedStatus(status);
     const params = new URLSearchParams(searchParams.toString());
     if (status === "ALL") {
       params.delete("status");
     } else {
       params.set("status", status);
     }
-    router.push(`/contracts?${params.toString()}`);
+    const targetUrl = `/contracts?${params.toString()}`;
+    router.push(targetUrl);
+    router.refresh();
   };
 
   const filteredContracts = contracts.filter((c) => {
+    if (selectedStatus !== "ALL" && c.status !== selectedStatus) {
+      return false;
+    }
     if (!searchTerm.trim()) return true;
     const q = searchTerm.toLowerCase();
     return (
@@ -58,7 +82,7 @@ export function ContractsListView({
   });
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-zinc-200/80 dark:border-zinc-800">
         <div>
@@ -100,21 +124,34 @@ export function ContractsListView({
         <div className="flex flex-wrap gap-2">
           {["ALL", "ACTIVE", "PAUSED", "COMPLETED", "TERMINATED"].map((status) => {
             const isSelected =
-              status === "ALL" ? !currentStatus : currentStatus.toUpperCase() === status;
+              status === selectedStatus ||
+              (status === "ALL" && (!selectedStatus || selectedStatus === "ALL"));
+            const count = statusCounts[status as keyof typeof statusCounts] ?? 0;
             return (
               <button
                 key={status}
                 type="button"
                 onClick={() => handleStatusFilter(status)}
-                className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all ${
+                className={`flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all ${
                   isSelected
                     ? "bg-zinc-900 text-white shadow dark:bg-white dark:text-zinc-950"
                     : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                 }`}
               >
-                {status === "ALL"
-                  ? "All Contracts"
-                  : status.charAt(0) + status.slice(1).toLowerCase()}
+                <span>
+                  {status === "ALL"
+                    ? "All"
+                    : status.charAt(0) + status.slice(1).toLowerCase()}
+                </span>
+                <span
+                  className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+                    isSelected
+                      ? "bg-zinc-700 text-white dark:bg-zinc-200 dark:text-zinc-900"
+                      : "bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300"
+                  }`}
+                >
+                  {count}
+                </span>
               </button>
             );
           })}
@@ -148,12 +185,14 @@ export function ContractsListView({
             📄
           </div>
           <h3 className="mt-4 text-lg font-bold text-zinc-900 dark:text-white">
-            {searchTerm || currentStatus
+            {searchTerm || (selectedStatus && selectedStatus !== "ALL")
               ? "No matching contracts found"
-              : "No active contracts yet"}
+              : "No contracts yet"}
           </h3>
           <p className="mt-2 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 max-w-md mx-auto">
-            {userRole === "CLIENT"
+            {searchTerm || (selectedStatus && selectedStatus !== "ALL")
+              ? "Try adjusting your search terms or status filter tab."
+              : userRole === "CLIENT"
               ? "When you accept a freelancer proposal, a formal contract is formed and will appear here."
               : "When a client accepts your proposal, your active work agreement and milestone deliverables will appear here."}
           </p>
@@ -190,27 +229,35 @@ export function ContractsListView({
               >
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   {/* Contract Details */}
-                  <div className="space-y-1.5 flex-1">
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                        {contract.counterpartyRole}: {contract.counterpartyName}
-                      </span>
-                      <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                      <span className="text-zinc-500" suppressHydrationWarning>
-                        Started {formatDate(contract.startDate)}
-                      </span>
-                      <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                      <span className="font-bold text-zinc-800 dark:text-zinc-200">
-                        {formattedAgreed}
-                      </span>
-                    </div>
+                  <div className="flex items-start gap-4 flex-1">
+                    <Avatar
+                      src={contract.counterpartyImage}
+                      name={contract.counterpartyName}
+                      role={contract.counterpartyRole === "Client" ? "CLIENT" : "FREELANCER"}
+                      userId={contract.counterpartyId}
+                      size="md"
+                    />
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                          {contract.counterpartyRole}: {contract.counterpartyName}
+                        </span>
+                        <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                        <span className="text-zinc-500" suppressHydrationWarning>
+                          Started {formatDate(contract.startDate)}
+                        </span>
+                        <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                        <span className="font-bold text-zinc-800 dark:text-zinc-200">
+                          {formattedAgreed}
+                        </span>
+                      </div>
 
-                    <Link
-                      href={`/contracts/${contract.id}`}
-                      className="block text-lg font-bold text-zinc-950 dark:text-white hover:text-emerald-600 transition"
-                    >
-                      {contract.title}
-                    </Link>
+                      <Link
+                        href={`/contracts/${contract.id}`}
+                        className="block text-lg font-bold text-zinc-950 dark:text-white hover:text-emerald-600 transition truncate"
+                      >
+                        {contract.title}
+                      </Link>
 
                     {/* Progress / Tracking Summary */}
                     {isHourly ? (
@@ -232,8 +279,9 @@ export function ContractsListView({
                       </div>
                     )}
                   </div>
+                </div>
 
-                  {/* Status & View CTA */}
+                {/* Status & View CTA */}
                   <div className="flex flex-wrap items-center gap-3">
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${

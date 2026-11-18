@@ -9,6 +9,7 @@ import { JobStatus } from "@prisma/client";
 import { formatDate } from "@/lib/utils";
 import { Avatar } from "@/components/ui/Avatar";
 import { DirectHireModal } from "@/components/dashboard/DirectHireModal";
+import { broadcastJobStatusChange } from "@/lib/events/job-events";
 
 export interface ClientDashboardJob {
   id: string;
@@ -130,21 +131,48 @@ export function ClientDashboardView({
 }: ClientDashboardViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [optimisticJobStatus, setOptimisticJobStatus] = useState<Record<string, JobStatus>>({});
-  const jobs = initialJobs.map((j) => ({
-    ...j,
-    status: optimisticJobStatus[j.id] || j.status,
-  }));
+
+  const validTabs = ["JOBS", "PROPOSALS", "CONTRACTS", "OFFERS", "TALENT"] as const;
+  type TabType = typeof validTabs[number];
+  const tabFromUrl = searchParams.get("tab")?.toUpperCase();
+  const initialTab: TabType = validTabs.includes(tabFromUrl as TabType)
+    ? (tabFromUrl as TabType)
+    : "JOBS";
+
+  const [activeTab, setActiveTabState] = useState<TabType>(initialTab);
+  const [jobs, setJobs] = useState<ClientDashboardJob[]>(initialJobs);
+  const [updatingJobIds, setUpdatingJobIds] = useState<Record<string, boolean>>({});
   const [searchTerm, setSearchTerm] = useState(searchQuery);
-  const [activeTab, setActiveTab] = useState<"JOBS" | "PROPOSALS" | "CONTRACTS" | "OFFERS" | "TALENT">("JOBS");
   const [actionError, setActionError] = useState<string | null>(null);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [hireFreelancer, setHireFreelancer] = useState<ClientDashboardFreelancer | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Sync state whenever server revalidates or sends fresh props
+  useEffect(() => {
+    setJobs(initialJobs);
+  }, [initialJobs]);
 
   useEffect(() => {
     setSearchTerm(searchQuery);
   }, [searchQuery]);
+
+  useEffect(() => {
+    const currentTab = searchParams.get("tab")?.toUpperCase();
+    if (validTabs.includes(currentTab as TabType)) {
+      setActiveTabState(currentTab as TabType);
+    }
+  }, [searchParams]);
+
+  const handleTabChange = (newTab: TabType) => {
+    setActiveTabState(newTab);
+    const params = new URLSearchParams(searchParams.toString());
+    if (newTab === "JOBS") {
+      params.delete("tab");
+    } else {
+      params.set("tab", newTab);
+    }
+    router.replace(`/dashboard/client?${params.toString()}`, { scroll: false });
+  };
 
   const handleStatusFilter = (status: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -175,25 +203,52 @@ export function ClientDashboardView({
     router.push(`/dashboard/client?${params.toString()}`);
   };
 
-  const handleStatusUpdate = (jobId: string, newStatus: JobStatus) => {
-    setActionError(null);
-    setActiveJobId(jobId);
+  const handleStatusUpdate = async (jobId: string, newStatus: JobStatus) => {
+    // Prevent duplicate/double clicks while an update is in progress
+    if (updatingJobIds[jobId]) return;
 
-    startTransition(async () => {
-      setOptimisticJobStatus((prev) => ({ ...prev, [jobId]: newStatus }));
+    const targetJob = jobs.find((j) => j.id === jobId);
+    if (!targetJob) return;
+
+    const previousStatus = targetJob.status;
+    if (previousStatus === newStatus) return;
+
+    setActionError(null);
+    setUpdatingJobIds((prev) => ({ ...prev, [jobId]: true }));
+
+    // Immediate optimistic update in UI
+    setJobs((prev) =>
+      prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j))
+    );
+
+    try {
       const res = await updateJobStatusAction({ jobId, status: newStatus });
       if (!res.success) {
-        setOptimisticJobStatus((prev) => {
-          const next = { ...prev };
-          delete next[jobId];
-          return next;
-        });
+        // Rollback on server error
+        setJobs((prev) =>
+          prev.map((j) => (j.id === jobId ? { ...j, status: previousStatus } : j))
+        );
         setActionError(res.error || "Failed to update job status.");
       } else {
-        router.refresh();
+        // Broadcast change across tabs and other dashboard views
+        broadcastJobStatusChange(jobId, newStatus as any);
+        startTransition(() => {
+          router.refresh();
+        });
       }
-      setActiveJobId(null);
-    });
+    } catch (err) {
+      console.error("Failed to update job status:", err);
+      setJobs((prev) =>
+        prev.map((j) => (j.id === jobId ? { ...j, status: previousStatus } : j))
+      );
+      setActionError("An unexpected network error occurred. Please try again.");
+    } finally {
+      setUpdatingJobIds((prev) => {
+        const next = { ...prev };
+        delete next[jobId];
+        return next;
+      });
+    }
   };
 
   const handleStartChat = async (freelancerId: string) => {
@@ -208,7 +263,7 @@ export function ClientDashboardView({
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Top Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-zinc-200/80 dark:border-zinc-800">
         <div>
@@ -216,7 +271,7 @@ export function ClientDashboardView({
             Client Workspace
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
-            Monitor active hiring, review applicants, negotiate proposals, and manage talent contracts.
+            Monitor active hiring, review applicants, and manage talent contracts.
           </p>
         </div>
 
@@ -240,7 +295,7 @@ export function ClientDashboardView({
       <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Active Jobs */}
         <div
-          onClick={() => setActiveTab("JOBS")}
+          onClick={() => handleTabChange("JOBS")}
           className="cursor-pointer rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-xs hover:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 transition"
         >
           <div className="flex items-center justify-between text-zinc-500 dark:text-zinc-400 text-xs font-semibold">
@@ -257,7 +312,7 @@ export function ClientDashboardView({
 
         {/* Received Proposals */}
         <div
-          onClick={() => setActiveTab("PROPOSALS")}
+          onClick={() => handleTabChange("PROPOSALS")}
           className="cursor-pointer rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-xs hover:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 transition"
         >
           <div className="flex items-center justify-between text-zinc-500 dark:text-zinc-400 text-xs font-semibold">
@@ -268,13 +323,13 @@ export function ClientDashboardView({
             {totalProposalsCount}
           </p>
           <span className="text-[11px] text-zinc-400">
-            Review & negotiate bids
+            Review proposals & chat
           </span>
         </div>
 
         {/* Ongoing Contracts */}
         <div
-          onClick={() => setActiveTab("CONTRACTS")}
+          onClick={() => handleTabChange("CONTRACTS")}
           className="cursor-pointer rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-xs hover:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 transition"
         >
           <div className="flex items-center justify-between text-zinc-500 dark:text-zinc-400 text-xs font-semibold">
@@ -291,7 +346,7 @@ export function ClientDashboardView({
 
         {/* Direct Offers */}
         <div
-          onClick={() => setActiveTab("OFFERS")}
+          onClick={() => handleTabChange("OFFERS")}
           className="cursor-pointer rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-xs hover:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 transition"
         >
           <div className="flex items-center justify-between text-zinc-500 dark:text-zinc-400 text-xs font-semibold">
@@ -302,7 +357,7 @@ export function ClientDashboardView({
             {hiringOffers.length}
           </p>
           <span className="text-[11px] text-zinc-400">
-            Direct offers & negotiations
+            Direct hiring offers
           </span>
         </div>
       </div>
@@ -318,7 +373,7 @@ export function ClientDashboardView({
         <div className="flex flex-wrap gap-2 sm:gap-6 text-xs font-bold">
           <button
             type="button"
-            onClick={() => setActiveTab("JOBS")}
+            onClick={() => handleTabChange("JOBS")}
             className={`pb-3 transition border-b-2 ${
               activeTab === "JOBS"
                 ? "border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400"
@@ -329,7 +384,7 @@ export function ClientDashboardView({
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("PROPOSALS")}
+            onClick={() => handleTabChange("PROPOSALS")}
             className={`pb-3 transition border-b-2 ${
               activeTab === "PROPOSALS"
                 ? "border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400"
@@ -340,7 +395,7 @@ export function ClientDashboardView({
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("CONTRACTS")}
+            onClick={() => handleTabChange("CONTRACTS")}
             className={`pb-3 transition border-b-2 ${
               activeTab === "CONTRACTS"
                 ? "border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400"
@@ -351,7 +406,7 @@ export function ClientDashboardView({
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("OFFERS")}
+            onClick={() => handleTabChange("OFFERS")}
             className={`pb-3 transition border-b-2 ${
               activeTab === "OFFERS"
                 ? "border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400"
@@ -362,7 +417,7 @@ export function ClientDashboardView({
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("TALENT")}
+            onClick={() => handleTabChange("TALENT")}
             className={`pb-3 transition border-b-2 ${
               activeTab === "TALENT"
                 ? "border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400"
@@ -441,6 +496,7 @@ export function ClientDashboardView({
                 const formattedBudget = isHourly
                   ? `$${job.hourlyMin ?? 0} - $${job.hourlyMax ?? 0} / hr`
                   : `$${job.budget?.toLocaleString() ?? 0} Fixed`;
+                const isUpdating = Boolean(updatingJobIds[job.id]);
 
                 return (
                   <div
@@ -493,20 +549,46 @@ export function ClientDashboardView({
                         {job.status === "OPEN" && (
                           <button
                             type="button"
+                            disabled={isUpdating}
+                            aria-busy={isUpdating}
                             onClick={() => handleStatusUpdate(job.id, "PAUSED" as JobStatus)}
-                            className="rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 transition"
+                            className={`inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 transition ${
+                              isUpdating
+                                ? "opacity-60 cursor-not-allowed bg-zinc-100 dark:bg-zinc-800"
+                                : "hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                            }`}
                           >
-                            Pause
+                            {isUpdating ? (
+                              <>
+                                <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-500 border-t-transparent" />
+                                <span>Pausing...</span>
+                              </>
+                            ) : (
+                              <span>Pause</span>
+                            )}
                           </button>
                         )}
 
                         {job.status === "PAUSED" && (
                           <button
                             type="button"
+                            disabled={isUpdating}
+                            aria-busy={isUpdating}
                             onClick={() => handleStatusUpdate(job.id, "OPEN" as JobStatus)}
-                            className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition"
+                            className={`inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition ${
+                              isUpdating
+                                ? "opacity-60 cursor-not-allowed"
+                                : "hover:bg-emerald-500"
+                            }`}
                           >
-                            Reopen
+                            {isUpdating ? (
+                              <>
+                                <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                <span>Reopening...</span>
+                              </>
+                            ) : (
+                              <span>Reopen</span>
+                            )}
                           </button>
                         )}
                       </div>
@@ -580,7 +662,7 @@ export function ClientDashboardView({
                       href={`/dashboard/client/jobs/${p.job.id}/proposals`}
                       className="font-bold text-emerald-600 hover:underline dark:text-emerald-400"
                     >
-                      Review & Negotiate →
+                      Review Proposals →
                     </Link>
                   </div>
                 </div>
@@ -662,7 +744,7 @@ export function ClientDashboardView({
       {activeTab === "OFFERS" && (
         <div className="mt-6 space-y-4">
           <h3 className="text-base font-bold text-zinc-950 dark:text-white mb-4">
-            Direct Hiring Offers & Negotiations
+            Direct Hiring Offers
           </h3>
 
           {hiringOffers.length === 0 ? (
