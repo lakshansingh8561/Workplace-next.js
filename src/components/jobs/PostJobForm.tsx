@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createJobAction } from "@/lib/actions/job";
 import { broadcastJobCreated } from "@/lib/events/job-events";
+import { JobSuccessModal } from "@/components/jobs/JobSuccessModal";
 import {
   SUPPORTED_CATEGORIES,
   DURATION_OPTIONS,
@@ -18,8 +19,17 @@ export function PostJobForm({ userName }: PostJobFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittingAction, setSubmittingAction] = useState<"OPEN" | "DRAFT" | null>(null);
-  const [isSuccess, setIsSuccess] = useState(false);
   const submittingRef = useRef(false);
+
+  // Success Popup Modal State
+  const [createdJobData, setCreatedJobData] = useState<{
+    id: string;
+    title: string;
+    category: string;
+    budgetFormatted: string;
+    duration: string;
+    status: "OPEN" | "DRAFT";
+  } | null>(null);
 
   // Form Fields
   const [title, setTitle] = useState("");
@@ -101,18 +111,26 @@ export function PostJobForm({ userName }: PostJobFormProps) {
       }
 
       if (result.jobId) {
-        setIsSuccess(true);
-        const destination =
-          targetStatus === "DRAFT"
-            ? "/dashboard/client?status=DRAFT"
-            : "/dashboard/client";
-
-        // Notify other components and tabs of newly published/saved job
+        // Broadcast newly created job event across tabs and listeners
         broadcastJobCreated(result.jobId, targetStatus, payload.title);
 
-        // Client-side router navigation prevents full window reload, avoiding auth flickering
-        router.push(destination);
-        router.refresh();
+        const budgetFormatted =
+          payload.type === "HOURLY"
+            ? `$${payload.hourlyMin ?? 0} - $${payload.hourlyMax ?? 0} / hr`
+            : `$${(payload.budget ?? 0).toLocaleString()} Fixed`;
+
+        setCreatedJobData({
+          id: result.jobId,
+          title: payload.title,
+          category: payload.category,
+          budgetFormatted,
+          duration: payload.duration,
+          status: targetStatus,
+        });
+
+        setIsSubmitting(false);
+        setSubmittingAction(null);
+        submittingRef.current = false;
       } else {
         setIsSubmitting(false);
         setSubmittingAction(null);
@@ -129,6 +147,27 @@ export function PostJobForm({ userName }: PostJobFormProps) {
       setSubmittingAction(null);
       submittingRef.current = false;
     }
+  };
+
+  const handleViewInMyJobs = () => {
+    if (!createdJobData) return;
+    const destination =
+      createdJobData.status === "DRAFT"
+        ? "/dashboard/client?status=DRAFT"
+        : `/dashboard/client?posted=${createdJobData.id}`;
+    window.location.href = destination;
+  };
+
+  const handlePostAnother = () => {
+    setCreatedJobData(null);
+    setTitle("");
+    setDescription("");
+    setSkills(["Next.js", "TypeScript"]);
+    setBudget(1500);
+    setHourlyMin(45);
+    setHourlyMax(75);
+    setError(null);
+    setFieldErrors({});
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -157,16 +196,6 @@ export function PostJobForm({ userName }: PostJobFormProps) {
             className="mb-6 rounded-xl bg-red-50 p-4 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200 dark:border-red-900/50"
           >
             {error}
-          </div>
-        )}
-
-        {isSuccess && (
-          <div
-            role="status"
-            className="mb-6 rounded-xl bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/50 flex items-center gap-2"
-          >
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-            Job posted successfully! Redirecting to your dashboard...
           </div>
         )}
 
@@ -490,7 +519,7 @@ export function PostJobForm({ userName }: PostJobFormProps) {
             <Link
               href="/jobs"
               className={`rounded-xl px-5 py-2.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 transition-colors ${
-                isSubmitting || isSuccess ? "pointer-events-none opacity-50" : ""
+                isSubmitting ? "pointer-events-none opacity-50" : ""
               }`}
             >
               Cancel
@@ -498,31 +527,41 @@ export function PostJobForm({ userName }: PostJobFormProps) {
 
             <button
               type="button"
-              disabled={isSubmitting || isSuccess}
+              disabled={isSubmitting}
               onClick={() => handleFormSubmit("DRAFT")}
               className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-2.5 text-xs font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 transition active:scale-95 disabled:opacity-60"
             >
-              {isSuccess && submittingAction === "DRAFT"
-                ? "Saved! Redirecting..."
-                : isSubmitting && submittingAction === "DRAFT"
+              {isSubmitting && submittingAction === "DRAFT"
                 ? "Saving Draft..."
                 : "Save as Draft"}
             </button>
 
             <button
               type="submit"
-              disabled={isSubmitting || isSuccess}
+              disabled={isSubmitting}
               className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 active:scale-95 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
             >
-              {isSuccess && submittingAction === "OPEN"
-                ? "Job Published! Redirecting..."
-                : isSubmitting && submittingAction === "OPEN"
+              {isSubmitting && submittingAction === "OPEN"
                 ? "Publishing Job..."
                 : "Publish Job Post"}
             </button>
           </div>
         </form>
       </div>
+
+      {/* Instant Success Confirmation Popup Modal */}
+      {createdJobData && (
+        <JobSuccessModal
+          isOpen={Boolean(createdJobData)}
+          jobId={createdJobData.id}
+          jobTitle={createdJobData.title}
+          category={createdJobData.category}
+          budgetFormatted={createdJobData.budgetFormatted}
+          duration={createdJobData.duration}
+          onViewInMyJobs={handleViewInMyJobs}
+          onPostAnother={handlePostAnother}
+        />
+      )}
     </div>
   );
 }

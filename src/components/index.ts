@@ -25,6 +25,7 @@ export { SignupForm } from "./auth/SignupForm";
 // Client Job Components
 export { PostJobForm } from "./jobs/PostJobForm";
 export { ApplyProposalModal } from "./jobs/ApplyProposalModal";
+export { JobSuccessModal } from "./jobs/JobSuccessModal";
 
 // Dashboard Components
 export { ClientDashboardView } from "./dashboard/ClientDashboardView";

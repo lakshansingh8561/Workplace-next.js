@@ -147,6 +147,16 @@ export function ClientDashboardView({
   const [hireFreelancer, setHireFreelancer] = useState<ClientDashboardFreelancer | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Posted Job Confirmation Banner state
+  const postedJobId = searchParams.get("posted");
+  const [showPostedNotice, setShowPostedNotice] = useState(Boolean(postedJobId));
+
+  useEffect(() => {
+    if (postedJobId) {
+      setShowPostedNotice(true);
+    }
+  }, [postedJobId]);
+
   // Reactive KPI counts with local state for immediate optimistic feedback
   const [counts, setCounts] = useState({
     activeJobs: activeJobsCount,
@@ -342,6 +352,31 @@ export function ClientDashboardView({
           </Link>
         </div>
       </div>
+
+      {/* Newly Posted Job Success Notification Banner */}
+      {showPostedNotice && (
+        <div className="mt-6 rounded-2xl bg-emerald-50 border border-emerald-200/90 p-4 sm:p-5 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300 flex items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-2xl shrink-0">🎉</span>
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold text-emerald-950 dark:text-emerald-100 truncate">
+                Job Posted Successfully!
+              </p>
+              <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">
+                Your job posting is now active and published. It is displayed under My Job Postings below.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowPostedNotice(false)}
+            className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-xs font-bold transition shrink-0"
+            aria-label="Dismiss banner"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* KPI Stats Overview Cards */}
       <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -543,21 +578,33 @@ export function ClientDashboardView({
             </div>
           ) : (
             <div className="space-y-4">
-              {jobs.map((job) => {
+              {jobs.map((job, idx) => {
                 const isHourly = job.type.toUpperCase() === "HOURLY";
                 const formattedBudget = isHourly
                   ? `$${job.hourlyMin ?? 0} - $${job.hourlyMax ?? 0} / hr`
                   : `$${job.budget?.toLocaleString() ?? 0} Fixed`;
                 const isUpdating = Boolean(updatingJobIds[job.id]);
+                const isJustPosted = Boolean(
+                  postedJobId && (postedJobId === job.id || (postedJobId === "true" && idx === 0))
+                );
 
                 return (
                   <div
                     key={job.id}
-                    className="rounded-3xl border border-zinc-200/90 bg-white p-6 shadow-xs hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/90 transition"
+                    className={`rounded-3xl p-6 shadow-xs transition ${
+                      isJustPosted
+                        ? "border-2 border-emerald-500 bg-emerald-50/10 ring-4 ring-emerald-500/10 dark:border-emerald-500 dark:bg-emerald-950/10 shadow-md"
+                        : "border border-zinc-200/90 bg-white hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/90"
+                    }`}
                   >
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="space-y-1.5 flex-1">
                         <div className="flex flex-wrap items-center gap-2 text-xs">
+                          {isJustPosted && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-600 text-white shadow-xs">
+                              ✨ Just Posted
+                            </span>
+                          )}
                           <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                             {job.category}
                           </span>
