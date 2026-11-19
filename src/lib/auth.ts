@@ -259,7 +259,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.id as string;
         session.user.name = (token.name as string) || session.user.name || null;
-        session.user.email = (token.email as string) || session.user.email || null;
+        session.user.email = (token.email as string) || session.user.email || "";
         session.user.image = (token.image as string) || session.user.image || null;
         if (token.role) session.user.role = token.role as Role;
         session.user.roleSelected = token.roleSelected !== false;

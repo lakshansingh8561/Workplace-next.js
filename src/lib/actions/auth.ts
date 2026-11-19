@@ -196,9 +196,6 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
       message:
         "Account created successfully. A 6-digit verification code has been sent to your email.",
     };
-      message:
-        "Account created successfully. A 6-digit verification code has been sent to your email.",
-    };
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

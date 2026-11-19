@@ -9,7 +9,7 @@ vi.mock("@/lib/auth", () => ({
 
 // Mock Prisma
 vi.mock("@/lib/prisma", () => {
-  const mockPrisma = {
+  const mockPrisma: any = {
     user: {
       findUnique: vi.fn(),
       create: vi.fn(),
@@ -20,7 +20,7 @@ vi.mock("@/lib/prisma", () => {
       create: vi.fn(),
       deleteMany: vi.fn(),
     },
-    $transaction: vi.fn((cb) => {
+    $transaction: vi.fn((cb: any): any => {
       if (typeof cb === "function") {
         return cb(mockPrisma);
       }
