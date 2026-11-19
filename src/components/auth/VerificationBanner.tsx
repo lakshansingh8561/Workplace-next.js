@@ -33,7 +33,11 @@ export function VerificationBanner({
       try {
         const result = await sendEmailVerificationOtpAction({ email });
         if (result.success) {
-          router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+          if (result.alreadyVerified) {
+            router.refresh();
+          } else {
+            router.push(`/verify-email?email=${encodeURIComponent(email)}&required=true`);
+          }
         } else {
           setErrorMessage(result.error || "Failed to send verification code.");
         }

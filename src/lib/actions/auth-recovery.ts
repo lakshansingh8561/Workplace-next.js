@@ -4,6 +4,8 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { signOut } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import {
   ForgotPasswordSchema,
@@ -506,8 +508,17 @@ export async function resendVerificationEmailAction(
 export async function sendEmailVerificationOtpAction(
   input: unknown
 ): Promise<AuthRecoveryResult> {
-  const parsed = SendEmailOtpSchema.safeParse(input);
+  const currentUser = await getCurrentUser();
 
+  // If input is empty or missing email but an authenticated session exists, default to authenticated user's email
+  let requestedEmail = "";
+  if (typeof input === "object" && input !== null && "email" in input && typeof (input as { email: unknown }).email === "string") {
+    requestedEmail = ((input as { email: string }).email || "").toLowerCase().trim();
+  } else if (currentUser?.email) {
+    requestedEmail = currentUser.email.toLowerCase().trim();
+  }
+
+  const parsed = SendEmailOtpSchema.safeParse({ email: requestedEmail });
   if (!parsed.success) {
     return {
       success: false,
@@ -518,16 +529,33 @@ export async function sendEmailVerificationOtpAction(
   const email = parsed.data.email.toLowerCase().trim();
   const clientIp = await getClientIp();
 
-  // Security guard: If a user session is active, verify they can only request OTP for their own email
-  const currentUser = await getCurrentUser();
-  if (
-    currentUser?.email &&
-    currentUser.email.toLowerCase() !== email
-  ) {
-    return {
-      success: false,
-      error: "You cannot request a verification code for another user's email address.",
-    };
+  // Security & Identity Guard:
+  // If an active user session exists, verify account ownership
+  if (currentUser?.id) {
+    const activeDbUser = await prisma.user.findUnique({
+      where: { id: currentUser.id },
+      select: { id: true, email: true, emailVerified: true },
+    });
+
+    if (activeDbUser) {
+      const sessionEmail = activeDbUser.email.toLowerCase();
+      if (sessionEmail !== email) {
+        // If the active session belongs to a different already-verified user (e.g. leftover from a previous account test),
+        // safely invalidate the old session so it doesn't block the new account's verification
+        if (activeDbUser.emailVerified) {
+          try {
+            await signOut({ redirect: false });
+          } catch {
+            // Non-blocking
+          }
+        } else {
+          return {
+            success: false,
+            error: "You cannot request a verification code for another user's email address.",
+          };
+        }
+      }
+    }
   }
 
   // Rate limit: 5 requests per 15 minutes per IP & email
@@ -602,12 +630,24 @@ export async function sendEmailVerificationOtpAction(
       });
     });
 
-    // Send email via configured provider (Resend or SMTP)
-    const emailResult = await sendEmailVerificationOtp({
-      to: email,
-      otp,
-      recipientName: user?.name,
-    });
+    // Send email via configured provider (Resend or SMTP) with safety timeout
+    const emailResult = await Promise.race([
+      sendEmailVerificationOtp({
+        to: email,
+        otp,
+        recipientName: user?.name,
+      }),
+      new Promise<{ success: false; error: string }>((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              success: false,
+              error: "Email delivery timed out. Please verify your email provider configuration on Render.",
+            }),
+          6000
+        )
+      ),
+    ]);
 
     if (!emailResult.success) {
       console.error(
@@ -660,16 +700,34 @@ export async function verifyEmailOtpAction(
   const otp = parsed.data.otp.trim();
   const clientIp = await getClientIp();
 
-  // Security guard: If a user session is active, ensure they cannot verify a different user's account
+  // Security & Identity Guard:
+  // If a user session is active, ensure proper identity matching
   const currentUser = await getCurrentUser();
-  if (
-    currentUser?.email &&
-    currentUser.email.toLowerCase() !== email
-  ) {
-    return {
-      success: false,
-      error: "You cannot verify an email address belonging to another user.",
-    };
+  if (currentUser?.id) {
+    const activeDbUser = await prisma.user.findUnique({
+      where: { id: currentUser.id },
+      select: { id: true, email: true, emailVerified: true },
+    });
+
+    if (activeDbUser) {
+      const sessionEmail = activeDbUser.email.toLowerCase();
+      if (sessionEmail !== email) {
+        // If the active session is a leftover already-verified session from another user,
+        // clear the stale session so it doesn't block this account from being verified
+        if (activeDbUser.emailVerified) {
+          try {
+            await signOut({ redirect: false });
+          } catch {
+            // Non-blocking
+          }
+        } else {
+          return {
+            success: false,
+            error: "You cannot verify an email address belonging to another user.",
+          };
+        }
+      }
+    }
   }
 
   // Rate limit OTP verification attempts to prevent brute force (10 attempts per 10 minutes)
@@ -782,6 +840,11 @@ export async function verifyEmailOtpAction(
         expired: result.expired,
       };
     }
+
+    revalidatePath("/", "layout");
+    revalidatePath("/verify-email");
+    revalidatePath("/dashboard/client");
+    revalidatePath("/dashboard/freelancer");
 
     if (result.alreadyVerified) {
       return {

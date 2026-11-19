@@ -101,6 +101,9 @@ export function ChatRoom({
       setIsLoading(true);
       setErrorMessage(null);
       setActionSuccess(null);
+      // Clean slate on conversation transition: immediately clear previous conversation state
+      setMessages([]);
+      setConversation(null);
       try {
         const res = await getMessagesAction(conversationId, 50);
         if (!ignore) {
@@ -158,8 +161,11 @@ export function ChatRoom({
         if (msg.conversationId !== conversationId) return;
 
         setMessages((prev) => {
+          // Strict conversation isolation guard
+          const scopedPrev = prev.filter((m) => !m.conversationId || m.conversationId === conversationId);
+
           // Check if message already exists (e.g. by persistent ID or optimistic match)
-          const alreadyExists = prev.some(
+          const alreadyExists = scopedPrev.some(
             (m) =>
               m.id === msg.id ||
               (m.senderId === msg.senderId &&
@@ -168,7 +174,7 @@ export function ChatRoom({
           );
 
           if (alreadyExists) {
-            return prev.map((m) =>
+            return scopedPrev.map((m) =>
               m.id === msg.id ||
               (m.senderId === msg.senderId && m.content === msg.content && m.id.startsWith("client_"))
                 ? msg
@@ -176,7 +182,7 @@ export function ChatRoom({
             );
           }
 
-          return [...prev, msg];
+          return [...scopedPrev, msg];
         });
 
         setTimeout(() => scrollToBottom("smooth"), 50);
@@ -418,10 +424,22 @@ export function ChatRoom({
     try {
       const socket = await getSocket();
       if (socket && socket.connected) {
+        let acknowledged = false;
+        const ackTimeout = setTimeout(() => {
+          if (!acknowledged) {
+            acknowledged = true;
+            fallbackToServerAction();
+          }
+        }, 5000);
+
         socket.emit(
           "message:send",
           { conversationId, content: trimmed, clientMessageId },
           (response) => {
+            if (acknowledged) return;
+            acknowledged = true;
+            clearTimeout(ackTimeout);
+
             setIsSending(false);
             if (response && response.success && response.message) {
               setMessages((prev) =>

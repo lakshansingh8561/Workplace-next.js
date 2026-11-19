@@ -6,9 +6,13 @@ import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { registerUser } from "@/lib/actions/auth";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import { useAppDispatch } from "@/lib/store";
+import { clearCredentials } from "@/lib/store/slices/authSlice";
+import { disconnectSocket } from "@/lib/socket/client";
 
 export function SignupForm() {
   const router = useRouter();
+  const dispatch = useAppDispatch();
   const [isPending, startTransition] = useTransition();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -31,6 +35,18 @@ export function SignupForm() {
     setFieldErrors({});
     setIsSubmitting(true);
 
+    // Clean any prior user state in client Redux, Socket, and session storage
+    dispatch(clearCredentials());
+    disconnectSocket();
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem("workpulse_verify_email");
+        sessionStorage.removeItem("workpulse_verify_role");
+      } catch {
+        // Safe fallback
+      }
+    }
+
     const safetyTimer = setTimeout(() => {
       setIsSubmitting(false);
       setError("Registration request timed out. Please check your network connection and try again.");
@@ -38,26 +54,16 @@ export function SignupForm() {
 
     startTransition(async () => {
       try {
-        // Fast non-blocking session cleanup only if an active session cookie exists
-        const hasSession =
-          typeof document !== "undefined" &&
-          (document.cookie.includes("authjs.session-token") ||
-            document.cookie.includes("next-auth.session-token"));
-
-        if (hasSession) {
-          try {
-            await Promise.race([
-              signOut({ redirect: false }),
-              new Promise((resolve) => setTimeout(resolve, 800)),
-            ]);
-          } catch {
-            // Non-blocking fallback
-          }
+        // Client-side session clear
+        try {
+          await signOut({ redirect: false });
+        } catch {
+          // Non-blocking
         }
 
         const cleanEmail = email.trim().toLowerCase();
         const result = await registerUser({
-          name,
+          name: name.trim(),
           email: cleanEmail,
           password,
           role,
@@ -101,6 +107,8 @@ export function SignupForm() {
             ? err.message
             : "An unexpected network error occurred. Please try again."
         );
+      } finally {
+        setIsSubmitting(false);
       }
     });
   };

@@ -27,6 +27,8 @@ export type AuthActionResult = {
   role?: Role;
   emailDelivered?: boolean;
   warning?: string;
+  requiresVerification?: boolean;
+  email?: string;
 };
 
 /**
@@ -45,7 +47,6 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
       }
     });
     return {
-      
       success: false,
       error: "Please correct the highlighted errors.",
       fieldErrors,
@@ -53,6 +54,14 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
   }
 
   const { name, email, password, role } = result.data;
+  const cleanEmail = email.toLowerCase().trim();
+
+  // Invalidate any existing server session so new registration begins with a pristine identity
+  try {
+    await signOut({ redirect: false });
+  } catch {
+    // Non-blocking
+  }
 
   // Rate limit registration requests by IP (5 attempts per 10 minutes)
   const clientIp = await getClientIp();
@@ -69,13 +78,20 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
 
   try {
     const existing = await prisma.user.findUnique({
-      where: { email },
+      where: { email: cleanEmail },
+      select: { id: true, email: true, emailVerified: true },
     });
 
     if (existing) {
+      if (!existing.emailVerified) {
+        return {
+          success: false,
+          error: "An account with this email address already exists but is unverified. Please check your inbox or click 'I already have a code' on the verification page.",
+        };
+      }
       return {
         success: false,
-        error: "An account with this email address already exists.",
+        error: "An account with this email address already exists. Please sign in instead.",
       };
     }
 
@@ -83,8 +99,8 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
 
     const newUser = await prisma.user.create({
       data: {
-        name,
-        email,
+        name: name.trim(),
+        email: cleanEmail,
         passwordHash,
         role: role as Role,
         roleSelected: true,
@@ -119,25 +135,40 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
         },
       });
 
-      const emailResult = await sendEmailVerificationOtp({
-        to: newUser.email,
-        otp,
-        recipientName: newUser.name,
-      });
+      // Strict 4.5s timeout on email delivery so registration never hangs or blocks the UI
+      const emailResult = await Promise.race([
+        sendEmailVerificationOtp({
+          to: newUser.email,
+          otp,
+          recipientName: newUser.name,
+        }),
+        new Promise<{ success: false; error: string }>((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                success: false,
+                error: "Verification email is queued. If not received within a minute, click Resend Code.",
+              }),
+            4500
+          )
+        ),
+      ]);
 
       if (!emailResult.success) {
         console.warn(
-          "[WorkPulse Verification Email Warning] User created, but OTP delivery failed:",
+          "[WorkPulse Verification Email Notice] User created, but OTP delivery response:",
           emailResult.error
         );
         return {
           success: true,
           emailDelivered: false,
+          role: newUser.role as Role,
+          email: newUser.email,
           warning:
             emailResult.error ||
-            "Account created, but verification email could not be delivered. Please check your email configuration or click Resend Code.",
+            "Account created! Your verification code is being delivered. You can click Resend Code if it does not arrive shortly.",
           message:
-            "Account created. The 6-digit verification code could not be delivered automatically.",
+            "Account created. If the code does not arrive in your inbox, click Resend Code.",
         };
       }
     } catch (emailErr) {
@@ -148,8 +179,10 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
       return {
         success: true,
         emailDelivered: false,
+        role: newUser.role as Role,
+        email: newUser.email,
         warning:
-          "Account created, but an error occurred while sending the verification email. Please request a new code.",
+          "Account created! Verification email could not be delivered immediately. Please click Resend Code on the next screen.",
         message:
           "Account created, but verification email could not be delivered.",
       };
@@ -158,6 +191,11 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
     return {
       success: true,
       emailDelivered: true,
+      role: newUser.role as Role,
+      email: newUser.email,
+      message:
+        "Account created successfully. A 6-digit verification code has been sent to your email.",
+    };
       message:
         "Account created successfully. A 6-digit verification code has been sent to your email.",
     };
@@ -275,30 +313,54 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
   }
 
   const { email, password, redirectTo } = result.data;
+  const cleanEmail = email.toLowerCase().trim();
   
   // Resolve role-based default destination
   let destination = sanitizeRedirectPath(redirectTo);
   let userRole: Role | undefined;
+  let isUnverified = false;
 
   try {
     const dbUser = await prisma.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
-      select: { role: true, roleSelected: true },
+      where: { email: cleanEmail },
+      select: {
+        id: true,
+        role: true,
+        roleSelected: true,
+        emailVerified: true,
+        passwordHash: true,
+      },
     });
-    if (dbUser) {
-      userRole = dbUser.role as Role;
-      if (
-        !redirectTo ||
-        (dbUser.role === "CLIENT" && (redirectTo === "/jobs" || redirectTo === "/dashboard" || redirectTo.startsWith("/dashboard/freelancer"))) ||
-        (dbUser.role === "FREELANCER" && (redirectTo === "/dashboard" || redirectTo.startsWith("/dashboard/client")))
-      ) {
-        if (!dbUser.roleSelected) {
-          destination = "/onboarding/role";
-        } else if (dbUser.role === "CLIENT") {
-          destination = "/dashboard/client";
-        } else {
-          destination = "/dashboard/freelancer";
-        }
+
+    if (!dbUser || !dbUser.passwordHash) {
+      return {
+        success: false,
+        error: "Invalid email or password.",
+      };
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, dbUser.passwordHash);
+    if (!isPasswordValid) {
+      return {
+        success: false,
+        error: "Invalid email or password.",
+      };
+    }
+
+    userRole = dbUser.role as Role;
+    isUnverified = !dbUser.emailVerified;
+
+    if (
+      !redirectTo ||
+      (dbUser.role === "CLIENT" && (redirectTo === "/jobs" || redirectTo === "/dashboard" || redirectTo.startsWith("/dashboard/freelancer"))) ||
+      (dbUser.role === "FREELANCER" && (redirectTo === "/dashboard" || redirectTo.startsWith("/dashboard/client")))
+    ) {
+      if (!dbUser.roleSelected) {
+        destination = "/onboarding/role";
+      } else if (dbUser.role === "CLIENT") {
+        destination = "/dashboard/client";
+      } else {
+        destination = "/dashboard/freelancer";
       }
     }
   } catch {
@@ -307,7 +369,7 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
 
   // Rate limit login attempts by IP and email (5 attempts per minute)
   const clientIp = await getClientIp();
-  const rateLimit = await checkRateLimit(`login:${clientIp}:${email.toLowerCase()}`, {
+  const rateLimit = await checkRateLimit(`login:${clientIp}:${cleanEmail}`, {
     limit: 5,
     windowMs: 60_000,
   });
@@ -319,15 +381,26 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
   }
 
   try {
+    // Clear any previous session cookie before creating new authenticated session
+    try {
+      await signOut({ redirect: false });
+    } catch {
+      // Non-blocking
+    }
+
     await signIn("credentials", {
-      email,
+      email: cleanEmail,
       password,
-      redirectTo: destination,
+      redirect: false,
     });
+
+    revalidatePath("/", "layout");
 
     return {
       success: true,
       role: userRole,
+      requiresVerification: isUnverified,
+      email: cleanEmail,
     };
   } catch (error) {
     if (error instanceof AuthError) {
@@ -371,8 +444,15 @@ export async function loginWithGoogleAction(redirectTo?: string) {
 }
 
 /**
- * Server Action to sign out the active user session.
+ * Server Action to sign out the active user session and invalidate layout caches.
  */
 export async function logoutUser() {
-  await signOut({ redirectTo: "/" });
+  try {
+    await signOut({ redirectTo: "/" });
+  } catch (err) {
+    if ((err as { digest?: string })?.digest?.startsWith("NEXT_REDIRECT")) {
+      throw err;
+    }
+  }
+  revalidatePath("/", "layout");
 }

@@ -198,6 +198,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           emailVerified?: Date | null;
         };
         token.id = user.id;
+        token.name = user.name;
+        token.email = user.email;
+        token.image = user.image;
         token.role = u.role;
         token.roleSelected = u.roleSelected;
         token.sessionVersion = u.sessionVersion ?? 1;
@@ -210,6 +213,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const dbUser = await prisma.user.findUnique({
             where: { id: token.id as string },
             select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
               role: true,
               roleSelected: true,
               sessionVersion: true,
@@ -220,10 +227,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // Invalidate JWT session if user was deleted or sessionVersion was incremented (e.g., password reset/change)
           if (!dbUser || (dbUser.sessionVersion ?? 1) !== (token.sessionVersion ?? 1)) {
             token.id = "";
+            token.email = "";
             token.role = undefined;
             return token;
           }
 
+          token.name = dbUser.name;
+          token.email = dbUser.email;
+          token.image = dbUser.image;
           token.role = dbUser.role;
           token.roleSelected = dbUser.roleSelected;
           token.sessionVersion = dbUser.sessionVersion ?? 1;
@@ -247,6 +258,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       if (session.user) {
         session.user.id = token.id as string;
+        session.user.name = (token.name as string) || session.user.name || null;
+        session.user.email = (token.email as string) || session.user.email || null;
+        session.user.image = (token.image as string) || session.user.image || null;
         if (token.role) session.user.role = token.role as Role;
         session.user.roleSelected = token.roleSelected !== false;
         session.user.sessionVersion =

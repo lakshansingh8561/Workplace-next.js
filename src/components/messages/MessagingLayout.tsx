@@ -186,6 +186,13 @@ export function MessagingLayout({
     };
   }, [currentUserId, dispatch, queryConvId, refreshConversations, selectedId]);
 
+  // Sync selectedId with query param changes (e.g. browser back/forward buttons)
+  useEffect(() => {
+    if (queryConvId) {
+      setSelectedId(queryConvId);
+    }
+  }, [queryConvId]);
+
   // Derive active conversation ID from:
   // 1. Direct local selection (user clicked in list)
   // 2. Query param ?conversationId=
@@ -196,12 +203,19 @@ export function MessagingLayout({
     ? conversations.find((c) => c.contractId === queryContractId)?.id ?? null
     : null;
 
-  const activeConversationId =
+  const candidateId =
     selectedId ||
     queryConvId ||
     contractMatchedId ||
-    initialActiveConversationId ||
-    (conversations[0]?.id ?? null);
+    initialActiveConversationId;
+
+  // Strict isolation check: candidateId must belong to this user's conversation list
+  const activeConversationId =
+    candidateId && conversations.some((c) => c.id === candidateId)
+      ? candidateId
+      : conversations.length > 0
+      ? conversations[0].id
+      : null;
 
   const handleSelectConversation = (id: string) => {
     setSelectedId(id);
@@ -265,6 +279,7 @@ export function MessagingLayout({
             </div>
           ) : activeConversationId ? (
             <ChatRoom
+              key={activeConversationId}
               conversationId={activeConversationId}
               currentUserId={currentUserId}
               onBackToList={handleBackToList}

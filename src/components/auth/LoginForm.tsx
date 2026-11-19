@@ -47,15 +47,29 @@ export function LoginForm() {
 
     startTransition(async () => {
       try {
+        if (typeof window !== "undefined") {
+          try {
+            sessionStorage.removeItem("workpulse_verify_email");
+            sessionStorage.removeItem("workpulse_verify_role");
+          } catch {
+            // Safe fallback
+          }
+        }
+
         const rawRedirect = searchParams.get("redirectTo");
         const result = await loginUser({
-          email,
+          email: email.trim().toLowerCase(),
           password,
           redirectTo: rawRedirect || undefined,
         });
 
         if (result && !result.success) {
           setError(result.error || "Invalid credentials.");
+        } else if (result?.requiresVerification) {
+          const verifyUrl = `/verify-email?email=${encodeURIComponent(
+            result.email || email.trim().toLowerCase()
+          )}&role=${result.role || "CLIENT"}&required=true`;
+          router.push(verifyUrl);
         } else {
           const role = result?.role;
           let target = "/dashboard";

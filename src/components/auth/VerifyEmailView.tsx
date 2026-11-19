@@ -128,9 +128,16 @@ export function VerifyEmailView() {
           const sessEmail = session.user.email.toLowerCase().trim();
           setActiveSessionEmail(sessEmail);
 
-          // If no email in URL and no email in state, populate from verified session
-          if (!emailParam && !email) {
+          // If no email in URL, populate from verified session
+          if (!emailParam) {
             setEmail(sessEmail);
+            if (typeof window !== "undefined") {
+              try {
+                sessionStorage.setItem("workpulse_verify_email", sessEmail);
+              } catch {
+                // Ignore
+              }
+            }
           }
         }
         if (session?.user?.role && !roleParam && !userRole) {
@@ -426,11 +433,19 @@ export function VerifyEmailView() {
               <button
                 type="button"
                 onClick={() => {
-                  router.push("/login?verified=true");
+                  const targetNorm = (emailParam || email).trim().toLowerCase();
+                  if (activeSessionEmail && activeSessionEmail === targetNorm) {
+                    router.push(userRole === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer");
+                  } else {
+                    router.push("/login?verified=true");
+                  }
+                  router.refresh();
                 }}
                 className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
               >
-                Sign In to Your Account →
+                {activeSessionEmail && activeSessionEmail === (emailParam || email).trim().toLowerCase()
+                  ? "Go to Workspace Dashboard →"
+                  : "Sign In to Your Account →"}
               </button>
             </div>
           </div>
@@ -466,11 +481,19 @@ export function VerifyEmailView() {
               <button
                 type="button"
                 onClick={() => {
-                  router.push("/login?verified=true");
+                  const targetNorm = (emailParam || email).trim().toLowerCase();
+                  if (activeSessionEmail && activeSessionEmail === targetNorm) {
+                    router.push(userRole === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer");
+                  } else {
+                    router.push("/login?verified=true");
+                  }
+                  router.refresh();
                 }}
                 className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
               >
-                Sign In to Your Account →
+                {activeSessionEmail && activeSessionEmail === (emailParam || email).trim().toLowerCase()
+                  ? "Go to Workspace Dashboard →"
+                  : "Sign In to Your Account →"}
               </button>
             </div>
           </div>

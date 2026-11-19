@@ -14,6 +14,7 @@ import { createNotificationSafe } from "@/lib/actions/notification";
 import { NotificationType, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { broadcastMessageToSocketServer } from "@/lib/socket/broadcast";
 
 export type ChatMessageDto = {
   id: string;
@@ -505,8 +506,13 @@ export async function getOrCreateDirectConversationAction(
         select: { id: true, clientId: true, status: true },
       });
       if (candidateJob) {
-        targetJobId = candidateJob.id;
-        if (user.role === "FREELANCER" && candidateJob.clientId) {
+        if (user.role === "CLIENT") {
+          // Strict conversation isolation: only associate if the authenticated client owns this job
+          if (candidateJob.clientId === user.id) {
+            targetJobId = candidateJob.id;
+          }
+        } else if (user.role === "FREELANCER" && candidateJob.clientId) {
+          targetJobId = candidateJob.id;
           actualClientId = candidateJob.clientId;
         }
       }
@@ -581,15 +587,23 @@ export async function getOrCreateDirectConversationAction(
     let existingConversation = null;
 
     if (targetJobId) {
-      existingConversation = await prisma.conversation.findUnique({
+      const candidateByJob = await prisma.conversation.findUnique({
         where: {
           jobId_freelancerId: {
             jobId: targetJobId,
             freelancerId: actualFreelancerId,
           },
         },
-        select: { id: true },
+        select: { id: true, clientId: true, freelancerId: true },
       });
+      // Strictly enforce conversation isolation: conversation must belong to this client and freelancer
+      if (
+        candidateByJob &&
+        candidateByJob.clientId === actualClientId &&
+        candidateByJob.freelancerId === actualFreelancerId
+      ) {
+        existingConversation = candidateByJob;
+      }
     }
 
     if (!existingConversation) {
@@ -1719,19 +1733,30 @@ export async function sendMessageAction(
       idempotencyKey: `message:${newMessage.id}:sent`,
     });
 
+    const formattedMessage: ChatMessageDto = {
+      id: newMessage.id,
+      conversationId: newMessage.conversationId,
+      senderId: newMessage.senderId,
+      content: newMessage.content,
+      read: newMessage.read,
+      createdAt: newMessage.createdAt.toISOString(),
+      sender: newMessage.sender,
+    };
+
+    // Real-Time Bridge: notify standalone Socket.IO server room and counterparty user room
+    try {
+      broadcastMessageToSocketServer(conversation.id, formattedMessage, counterpartyId).catch((err) => {
+        console.warn("[WorkPulse Socket Broadcast Non-fatal Warning]:", err);
+      });
+    } catch {
+      // Non-blocking
+    }
+
     revalidatePath("/messages");
 
     return {
       success: true,
-      message: {
-        id: newMessage.id,
-        conversationId: newMessage.conversationId,
-        senderId: newMessage.senderId,
-        content: newMessage.content,
-        read: newMessage.read,
-        createdAt: newMessage.createdAt.toISOString(),
-        sender: newMessage.sender,
-      },
+      message: formattedMessage,
     };
   } catch (error) {
     console.error(

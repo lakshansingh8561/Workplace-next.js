@@ -4,6 +4,7 @@ export interface MessagingState {
   activeConversationId: string | null;
   unreadConversationCount: number;
   draftMessages: Record<string, string>;
+  messagesByConversation: Record<string, any[]>;
   isChatSidebarOpen: boolean;
   onlineUsers: Record<string, boolean>;
   typingUsers: Record<string, Record<string, { isTyping: boolean; name?: string }>>;
@@ -14,6 +15,7 @@ const initialState: MessagingState = {
   activeConversationId: null,
   unreadConversationCount: 0,
   draftMessages: {},
+  messagesByConversation: {},
   isChatSidebarOpen: false,
   onlineUsers: {},
   typingUsers: {},
@@ -86,6 +88,25 @@ export const messagingSlice = createSlice({
     clearTypingForConversation: (state, action: PayloadAction<string>) => {
       delete state.typingUsers[action.payload];
     },
+    setConversationMessages: (
+      state,
+      action: PayloadAction<{ conversationId: string; messages: any[] }>
+    ) => {
+      state.messagesByConversation[action.payload.conversationId] = action.payload.messages;
+    },
+    appendConversationMessage: (
+      state,
+      action: PayloadAction<{ conversationId: string; message: any }>
+    ) => {
+      const { conversationId, message } = action.payload;
+      if (!state.messagesByConversation[conversationId]) {
+        state.messagesByConversation[conversationId] = [];
+      }
+      state.messagesByConversation[conversationId].push(message);
+    },
+    clearConversationMessages: (state, action: PayloadAction<string>) => {
+      delete state.messagesByConversation[action.payload];
+    },
   },
 });
 
@@ -101,6 +122,9 @@ export const {
   setUserOffline,
   setUserTyping,
   clearTypingForConversation,
+  setConversationMessages,
+  appendConversationMessage,
+  clearConversationMessages,
 } = messagingSlice.actions;
 
 export default messagingSlice.reducer;

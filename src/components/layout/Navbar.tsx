@@ -8,7 +8,8 @@ import { SessionUser } from "@/lib/session";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAppDispatch, useAppSelector } from "@/lib/store";
-import { setCredentials } from "@/lib/store/slices/authSlice";
+import { setCredentials, clearCredentials } from "@/lib/store/slices/authSlice";
+import { disconnectSocket } from "@/lib/socket/client";
 
 interface NavbarProps {
   user?: SessionUser | null;
@@ -478,10 +479,13 @@ export function Navbar({ user }: NavbarProps) {
   const dispatch = useAppDispatch();
   const reduxUser = useAppSelector((state) => state.auth.user);
 
-  // Fallback to persisted Redux session if user prop is transiently undefined/null during SSR transitions
+  // Authoritative server-side identity:
+  // If user prop is explicitly passed (either object or null), it takes precedence over client Redux cache.
+  // Only when user prop is undefined (e.g. before initial server render) do we check reduxUser.
   const effectiveUser: SessionUser | null =
-    user ??
-    (reduxUser
+    user !== undefined
+      ? user
+      : reduxUser
       ? ({
           id: reduxUser.id,
           name: reduxUser.name ?? null,
@@ -491,7 +495,7 @@ export function Navbar({ user }: NavbarProps) {
           roleSelected: Boolean(reduxUser.roleSelected),
           emailVerified: reduxUser.emailVerified ? new Date(reduxUser.emailVerified) : null,
         } as SessionUser)
-      : null);
+      : null;
 
   const currentImage =
     reduxUser?.id === effectiveUser?.id && reduxUser?.image !== undefined
@@ -546,8 +550,10 @@ export function Navbar({ user }: NavbarProps) {
             : null,
         })
       );
+    } else if (user === null) {
+      // Authoritative server state: user is unauthenticated
+      dispatch(clearCredentials());
     }
-    // Note: Never wipe Redux credentials on transient null props; only handleSignOut explicitly resets.
   }, [user, dispatch]);
 
   const closeMenu = () => {
@@ -560,7 +566,16 @@ export function Navbar({ user }: NavbarProps) {
 
   const handleSignOut = async () => {
     closeMenu();
-    dispatch(setCredentials(null));
+    disconnectSocket();
+    dispatch(clearCredentials());
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem("workpulse_verify_email");
+        sessionStorage.removeItem("workpulse_verify_role");
+      } catch {
+        // Safe cleanup
+      }
+    }
     await logoutUser();
   };
 

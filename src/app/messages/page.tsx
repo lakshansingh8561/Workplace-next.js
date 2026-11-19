@@ -69,6 +69,11 @@ async function MessagesContent({ searchParams }: MessagesPageProps) {
   const conversations = conversationsRes.conversations || [];
   const inboxError = !conversationsRes.success ? conversationsRes.error : null;
 
+  // Strict conversation isolation: ensure the activeConversationId actually belongs to this authenticated user
+  if (activeConversationId && !conversations.some((c) => c.id === activeConversationId)) {
+    activeConversationId = conversations[0]?.id || null;
+  }
+
   return (
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 pb-12">
       <MessagingLayout

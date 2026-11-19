@@ -163,7 +163,7 @@ export async function sendEmail({
   // 1. Production provider integration: Resend API (HTTP POST over port 443)
   if (resendApiKey) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8-second safety timeout
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5-second fast timeout
 
     try {
       const response = await fetch("https://api.resend.com/emails", {
@@ -216,7 +216,7 @@ export async function sendEmail({
     } catch (err) {
       clearTimeout(timeoutId);
       const isAbort = err instanceof Error && err.name === "AbortError";
-      const errMsg = isAbort ? "Connection to Resend API timed out (8s limit)" : err instanceof Error ? err.message : "Network error";
+      const errMsg = isAbort ? "Connection to Resend API timed out (5s limit)" : err instanceof Error ? err.message : "Network error";
       console.error(
         "[WorkPulse Email Error] Network exception connecting to Resend API:",
         errMsg
@@ -245,9 +245,9 @@ export async function sendEmail({
         port: targetPort,
         secure: isSecure,
         requireTLS: !isSecure,
-        connectionTimeout: 8000, // 8s TCP connection timeout (never hangs indefinitely)
-        greetingTimeout: 8000,   // 8s SMTP greeting timeout
-        socketTimeout: 10000,    // 10s socket timeout
+        connectionTimeout: 5000, // 5s TCP connection timeout (never hangs indefinitely)
+        greetingTimeout: 5000,   // 5s SMTP greeting timeout
+        socketTimeout: 6000,     // 6s socket timeout
         auth: {
           user: emailUser.trim(),
           pass: cleanPass,
