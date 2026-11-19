@@ -48,9 +48,19 @@ vi.mock("@/lib/rate-limit", () => ({
   getClientIp: vi.fn().mockResolvedValue("127.0.0.1"),
 }));
 
-// Mock Next.js cache
+// Mock Next.js cache and headers
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
+}));
+
+vi.mock("next/headers", () => ({
+  cookies: vi.fn().mockResolvedValue({
+    getAll: vi.fn().mockReturnValue([]),
+    delete: vi.fn(),
+    set: vi.fn(),
+    get: vi.fn(),
+  }),
+  headers: vi.fn().mockResolvedValue(new Headers()),
 }));
 
 import { prisma } from "@/lib/prisma";
@@ -212,8 +222,8 @@ describe("WorkPulse Authentication & Email OTP Lifecycle Unit Tests", () => {
       expect(result.error).toBe("You cannot request a verification code for another user's email address.");
     });
 
-    it("auto-clears a stale leftover verified session when registering/verifying a new account", async () => {
-      // Stale leftover session from an old verified account
+    it("safely rejects cross-account OTP request when another account is actively signed in", async () => {
+      // Active session for a different account
       (getCurrentUser as any).mockResolvedValue({
         id: "old_verified_user",
         email: "old.verified@example.com",
@@ -231,9 +241,9 @@ describe("WorkPulse Authentication & Email OTP Lifecycle Unit Tests", () => {
 
       const result = await sendEmailVerificationOtpAction({ email: "dikshu85@yopmail.com" });
 
-      // Stale session was signed out, new verification proceeded cleanly
-      expect(signOut).toHaveBeenCalled();
-      expect(result.success).toBe(true);
+      // Protects active account: does NOT invalidate session, but cleanly blocks cross-account verification
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Another account is currently signed in");
     });
   });
 
@@ -328,6 +338,26 @@ describe("WorkPulse Authentication & Email OTP Lifecycle Unit Tests", () => {
       expect(result.success).toBe(false);
       expect(result.expired).toBe(true);
       expect(result.error).toContain("expired");
+    });
+
+    it("safely blocks cross-account OTP verification when another account is actively signed in", async () => {
+      (getCurrentUser as any).mockResolvedValue({
+        id: "active_user_b",
+        email: "userb@example.com",
+        role: "CLIENT",
+      });
+      (prisma.user.findUnique as any).mockResolvedValue({
+        id: "active_user_b",
+        email: "userb@example.com",
+      });
+
+      const result = await verifyEmailOtpAction({
+        email: "dikshu85@yopmail.com",
+        otp: "654321",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Another account is currently signed in");
     });
   });
 

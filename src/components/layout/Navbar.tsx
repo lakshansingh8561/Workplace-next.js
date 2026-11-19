@@ -105,49 +105,49 @@ function DesktopNavList({
     <>
       {user.role === "CLIENT" ? (
         <>
-          <Link href="/freelancers" prefetch={true} className={getLinkClass("/freelancers")}>
+          <Link href="/freelancers" prefetch={false} className={getLinkClass("/freelancers")}>
             Find Freelancers
           </Link>
-          <Link href="/dashboard/client" prefetch={true} className={getLinkClass("/dashboard/client")}>
+          <Link href="/dashboard/client" prefetch={false} className={getLinkClass("/dashboard/client")}>
             My Jobs
           </Link>
-          <Link href="/jobs/new" prefetch={true} className={getLinkClass("/jobs/new")}>
+          <Link href="/jobs/new" prefetch={false} className={getLinkClass("/jobs/new")}>
             Post a Job
           </Link>
-          <Link href="/dashboard/client/proposals" prefetch={true} className={getLinkClass("/dashboard/client/proposals")}>
+          <Link href="/dashboard/client/proposals" prefetch={false} className={getLinkClass("/dashboard/client/proposals")}>
             Proposals
           </Link>
-          <Link href="/contracts" prefetch={true} className={getLinkClass("/contracts")}>
+          <Link href="/contracts" prefetch={false} className={getLinkClass("/contracts")}>
             Contracts
           </Link>
-          <Link href="/messages" prefetch={true} className={getLinkClass("/messages")}>
+          <Link href="/messages" prefetch={false} className={getLinkClass("/messages")}>
             Messages
           </Link>
         </>
       ) : (
         <>
-          <Link href="/jobs" prefetch={true} className={getLinkClass("/jobs")}>
+          <Link href="/jobs" prefetch={false} className={getLinkClass("/jobs")}>
             Find Work
           </Link>
           <Link
             href="/dashboard/freelancer/proposals"
-            prefetch={true}
+            prefetch={false}
             className={getLinkClass("/dashboard/freelancer/proposals")}
           >
             My Proposals
           </Link>
-          <Link href="/clients" prefetch={true} className={getLinkClass("/clients")}>
+          <Link href="/clients" prefetch={false} className={getLinkClass("/clients")}>
             Find Clients
           </Link>
-          <Link href="/contracts" prefetch={true} className={getLinkClass("/contracts")}>
+          <Link href="/contracts" prefetch={false} className={getLinkClass("/contracts")}>
             Contracts
           </Link>
-          <Link href="/messages" prefetch={true} className={getLinkClass("/messages")}>
+          <Link href="/messages" prefetch={false} className={getLinkClass("/messages")}>
             Messages
           </Link>
           <Link
             href="/dashboard/freelancer/payments"
-            prefetch={true}
+            prefetch={false}
             className={`hidden 2xl:inline-block ${getLinkClass("/dashboard/freelancer/payments")}`}
           >
             Earnings
@@ -577,6 +577,9 @@ export function Navbar({ user }: NavbarProps) {
       }
     }
     await logoutUser();
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
+    }
   };
 
   return (

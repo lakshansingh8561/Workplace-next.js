@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { signOut } from "@/lib/auth";
+import { clearAllAuthCookies } from "@/lib/actions/auth";
 import { revalidatePath } from "next/cache";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import {
@@ -530,31 +531,19 @@ export async function sendEmailVerificationOtpAction(
   const clientIp = await getClientIp();
 
   // Security & Identity Guard:
-  // If an active user session exists, verify account ownership
+  // An active authenticated session for Account A must NOT be invalidated or allowed to request codes
+  // for an unrelated Account B. Cross-account verification requests are rejected cleanly without side-effects.
   if (currentUser?.id) {
     const activeDbUser = await prisma.user.findUnique({
       where: { id: currentUser.id },
       select: { id: true, email: true, emailVerified: true },
     });
 
-    if (activeDbUser) {
-      const sessionEmail = activeDbUser.email.toLowerCase();
-      if (sessionEmail !== email) {
-        // If the active session belongs to a different already-verified user (e.g. leftover from a previous account test),
-        // safely invalidate the old session so it doesn't block the new account's verification
-        if (activeDbUser.emailVerified) {
-          try {
-            await signOut({ redirect: false });
-          } catch {
-            // Non-blocking
-          }
-        } else {
-          return {
-            success: false,
-            error: "You cannot request a verification code for another user's email address.",
-          };
-        }
-      }
+    if (activeDbUser && activeDbUser.email.toLowerCase() !== email) {
+      return {
+        success: false,
+        error: "Another account is currently signed in. Please sign out before requesting a verification code for this email.",
+      };
     }
   }
 
@@ -701,7 +690,7 @@ export async function verifyEmailOtpAction(
   const clientIp = await getClientIp();
 
   // Security & Identity Guard:
-  // If a user session is active, ensure proper identity matching
+  // Reject cross-account verification attempts without invalidating the active session.
   const currentUser = await getCurrentUser();
   if (currentUser?.id) {
     const activeDbUser = await prisma.user.findUnique({
@@ -709,24 +698,11 @@ export async function verifyEmailOtpAction(
       select: { id: true, email: true, emailVerified: true },
     });
 
-    if (activeDbUser) {
-      const sessionEmail = activeDbUser.email.toLowerCase();
-      if (sessionEmail !== email) {
-        // If the active session is a leftover already-verified session from another user,
-        // clear the stale session so it doesn't block this account from being verified
-        if (activeDbUser.emailVerified) {
-          try {
-            await signOut({ redirect: false });
-          } catch {
-            // Non-blocking
-          }
-        } else {
-          return {
-            success: false,
-            error: "You cannot verify an email address belonging to another user.",
-          };
-        }
-      }
+    if (activeDbUser && activeDbUser.email.toLowerCase() !== email) {
+      return {
+        success: false,
+        error: "Another account is currently signed in. Please sign out from that account before verifying this email.",
+      };
     }
   }
 

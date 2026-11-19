@@ -10,6 +10,7 @@ import {
   verifyEmailOtpAction,
   getUserVerificationStateAction,
 } from "@/lib/actions/auth-recovery";
+import { clearAllAuthCookiesAction } from "@/lib/actions/auth";
 
 export function VerifyEmailView() {
   const router = useRouter();
@@ -274,7 +275,7 @@ export function VerifyEmailView() {
   const handleSignOutConflictingSession = () => {
     startSignOutTransition(async () => {
       try {
-        await signOut({ redirect: false });
+        await clearAllAuthCookiesAction();
         setActiveSessionEmail(null);
         setErrorMessage(null);
       } catch {

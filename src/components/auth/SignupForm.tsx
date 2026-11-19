@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
-import { registerUser } from "@/lib/actions/auth";
+import { registerUser, clearAllAuthCookiesAction } from "@/lib/actions/auth";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { useAppDispatch } from "@/lib/store";
 import { clearCredentials } from "@/lib/store/slices/authSlice";
@@ -54,12 +54,8 @@ export function SignupForm() {
 
     startTransition(async () => {
       try {
-        // Client-side session clear
-        try {
-          await signOut({ redirect: false });
-        } catch {
-          // Non-blocking
-        }
+        // Complete server-side cookie and session purge
+        await clearAllAuthCookiesAction();
 
         const cleanEmail = email.trim().toLowerCase();
         const result = await registerUser({

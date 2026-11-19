@@ -9,6 +9,7 @@ import { signIn, signOut } from "@/lib/auth";
 import { getCurrentUser } from "@/lib/session";
 import { AuthError } from "next-auth";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 
 import {
   SignupSchema,
@@ -18,6 +19,87 @@ import {
 } from "@/lib/validations/auth";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { sendVerificationEmail, sendEmailVerificationOtp, getAppBaseUrl } from "@/lib/email";
+
+/**
+ * Hard-delete all Auth.js / NextAuth session, CSRF, and callback cookies.
+ * Handles HTTPS __Secure- and __Host- prefixes, chunked session tokens (.0, .1, etc.),
+ * and explicit path deletion to strictly guarantee session isolation.
+ */
+export async function clearAllAuthCookies(): Promise<void> {
+  try {
+    const cookieStore = await cookies();
+    const allCookies = cookieStore.getAll();
+    const isProd = process.env.NODE_ENV === "production";
+
+    // 1. Delete all matching cookies from incoming request headers
+    for (const cookie of allCookies) {
+      const name = cookie.name;
+      if (
+        name.includes("session-token") ||
+        name.includes("csrf-token") ||
+        name.includes("callback-url") ||
+        name.includes("authjs") ||
+        name.includes("next-auth")
+      ) {
+        cookieStore.delete(name);
+        cookieStore.set(name, "", {
+          path: "/",
+          maxAge: 0,
+          expires: new Date(0),
+          secure: name.startsWith("__Secure-") || name.startsWith("__Host-") || isProd,
+          sameSite: "lax",
+          httpOnly: true,
+        });
+      }
+    }
+
+    // 2. Explicitly invalidate all standard Auth.js & NextAuth cookie variants and chunks (0..4)
+    const knownBaseNames = [
+      "authjs.session-token",
+      "__Secure-authjs.session-token",
+      "authjs.csrf-token",
+      "__Host-authjs.csrf-token",
+      "__Secure-authjs.csrf-token",
+      "authjs.callback-url",
+      "__Secure-authjs.callback-url",
+      "next-auth.session-token",
+      "__Secure-next-auth.session-token",
+      "next-auth.csrf-token",
+      "__Host-next-auth.csrf-token",
+      "next-auth.callback-url",
+    ];
+
+    for (const base of knownBaseNames) {
+      const namesToClear = [base, `${base}.0`, `${base}.1`, `${base}.2`, `${base}.3`, `${base}.4`];
+      for (const name of namesToClear) {
+        cookieStore.delete(name);
+        cookieStore.set(name, "", {
+          path: "/",
+          maxAge: 0,
+          expires: new Date(0),
+          secure: name.startsWith("__Secure-") || name.startsWith("__Host-") || isProd,
+          sameSite: "lax",
+          httpOnly: true,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[WorkPulse Auth] Notice clearing auth cookies:", err);
+  }
+}
+
+/**
+ * Server Action callable from client forms to purge any lingering session before starting fresh signup or verification.
+ */
+export async function clearAllAuthCookiesAction(): Promise<{ success: boolean }> {
+  await clearAllAuthCookies();
+  try {
+    await signOut({ redirect: false });
+  } catch {
+    // Non-blocking
+  }
+  return { success: true };
+}
 
 export type AuthActionResult = {
   success: boolean;
@@ -37,6 +119,9 @@ export type AuthActionResult = {
  * and restricts roles strictly to CLIENT or FREELANCER.
  */
 export async function registerUser(input: unknown): Promise<AuthActionResult> {
+  // Purge any lingering session cookies from previously active accounts
+  await clearAllAuthCookies();
+
   const result = SignupSchema.safeParse(input);
 
   if (!result.success) {
@@ -378,7 +463,9 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
   }
 
   try {
-    // Clear any previous session cookie before creating new authenticated session
+    // Purge any stale session cookies completely before establishing new authenticated session
+    await clearAllAuthCookies();
+
     try {
       await signOut({ redirect: false });
     } catch {
@@ -444,12 +531,11 @@ export async function loginWithGoogleAction(redirectTo?: string) {
  * Server Action to sign out the active user session and invalidate layout caches.
  */
 export async function logoutUser() {
+  await clearAllAuthCookies();
   try {
-    await signOut({ redirectTo: "/" });
-  } catch (err) {
-    if ((err as { digest?: string })?.digest?.startsWith("NEXT_REDIRECT")) {
-      throw err;
-    }
+    await signOut({ redirect: false });
+  } catch {
+    // Non-blocking fallback
   }
   revalidatePath("/", "layout");
 }

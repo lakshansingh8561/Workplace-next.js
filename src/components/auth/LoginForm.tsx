@@ -6,9 +6,13 @@ import Link from "next/link";
 import { loginUser } from "@/lib/actions/auth";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { sanitizeRedirectPath } from "@/lib/validations/auth";
+import { useAppDispatch } from "@/lib/store";
+import { clearCredentials } from "@/lib/store/slices/authSlice";
+import { disconnectSocket } from "@/lib/socket/client";
 
 export function LoginForm() {
   const router = useRouter();
+  const dispatch = useAppDispatch();
   const searchParams = useSearchParams();
 
   const isRegistered = searchParams.get("registered") === "true";
@@ -99,8 +103,18 @@ export function LoginForm() {
             target = rawRedirect ? sanitizeRedirectPath(rawRedirect) : "/dashboard";
           }
 
-          router.push(target);
-          router.refresh();
+          // Reset client Redux credentials and disconnect any active socket from previous session
+          dispatch(clearCredentials());
+          disconnectSocket();
+
+          // Native browser navigation guarantees complete purge of client router cache,
+          // fresh session cookie validation, and authoritative RootLayout/Navbar re-hydration
+          if (typeof window !== "undefined") {
+            window.location.href = target;
+          } else {
+            router.push(target);
+            router.refresh();
+          }
         }
       } catch (err) {
         if ((err as { digest?: string })?.digest?.startsWith("NEXT_REDIRECT")) {

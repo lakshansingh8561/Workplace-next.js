@@ -9,6 +9,9 @@ import {
   ContractListItem,
 } from "@/components/contracts/ContractsListView";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata: Metadata = {
   title: "Contracts | WorkPulse",
   description: "View and manage active client-freelancer contracts and milestone deliverables.",
