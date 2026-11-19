@@ -259,7 +259,7 @@ export async function searchFreelancersAction(
         averageRating: stats.avg,
         totalReviews: stats.count,
         isAvailable: f.isAvailable ?? true,
-        createdAt: f.createdAt.toISOString(),
+        createdAt: f.createdAt ? new Date(f.createdAt).toISOString() : new Date().toISOString(),
       };
     });
 

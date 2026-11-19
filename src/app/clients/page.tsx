@@ -11,12 +11,12 @@ export const metadata: Metadata = {
 };
 
 interface ClientsPageProps {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
 async function ClientsContent({ searchParams }: ClientsPageProps) {
   await connection();
-  const resolved = await searchParams;
+  const resolved = (searchParams ? await searchParams : {}) || {};
 
   const query = typeof resolved.query === "string" ? resolved.query : undefined;
   const industry = typeof resolved.industry === "string" ? resolved.industry : undefined;
@@ -27,14 +27,28 @@ async function ClientsContent({ searchParams }: ClientsPageProps) {
       : "jobs_desc";
   const page = typeof resolved.page === "string" ? parseInt(resolved.page, 10) : 1;
 
-  const initialData = await searchClientsAction({
-    query,
-    industry,
-    location,
-    sort,
-    page: isNaN(page) ? 1 : page,
-    limit: 12,
-  });
+  let initialData;
+  try {
+    initialData = await searchClientsAction({
+      query,
+      industry,
+      location,
+      sort,
+      page: isNaN(page) ? 1 : page,
+      limit: 12,
+    });
+  } catch (error) {
+    console.error("[ClientsContent Error]:", error);
+    initialData = {
+      success: false,
+      clients: [],
+      totalCount: 0,
+      page: 1,
+      totalPages: 1,
+      industries: [],
+      error: "Failed to load clients directory. Please try again.",
+    };
+  }
 
   return <ClientDiscoveryView initialData={initialData} />;
 }

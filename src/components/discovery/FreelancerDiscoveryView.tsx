@@ -20,14 +20,14 @@ export function FreelancerDiscoveryView({
   const [isPending, startTransition] = useTransition();
 
   // Controlled filter state synced from URL search params
-  const [query, setQuery] = useState(searchParams.get("query") || "");
-  const [selectedSkill, setSelectedSkill] = useState(searchParams.get("skill") || "ALL");
-  const [experience, setExperience] = useState(searchParams.get("experience") || "ALL");
-  const [minRate, setMinRate] = useState(searchParams.get("minRate") || "");
-  const [maxRate, setMaxRate] = useState(searchParams.get("maxRate") || "");
-  const [availability, setAvailability] = useState(searchParams.get("isAvailable") || "ALL");
-  const [minRating, setMinRating] = useState(searchParams.get("minRating") || "ALL");
-  const [sortBy, setSortBy] = useState(searchParams.get("sort") || "rating");
+  const [query, setQuery] = useState(searchParams?.get("query") || "");
+  const [selectedSkill, setSelectedSkill] = useState(searchParams?.get("skill") || "ALL");
+  const [experience, setExperience] = useState(searchParams?.get("experience") || "ALL");
+  const [minRate, setMinRate] = useState(searchParams?.get("minRate") || "");
+  const [maxRate, setMaxRate] = useState(searchParams?.get("maxRate") || "");
+  const [availability, setAvailability] = useState(searchParams?.get("isAvailable") || "ALL");
+  const [minRating, setMinRating] = useState(searchParams?.get("minRating") || "ALL");
+  const [sortBy, setSortBy] = useState(searchParams?.get("sort") || "rating");
   const [activeChatFreelancerId, setActiveChatFreelancerId] = useState<string | null>(null);
   const [hireFreelancer, setHireFreelancer] = useState<{
     id: string;
@@ -60,7 +60,7 @@ export function FreelancerDiscoveryView({
   };
 
   const applyFilters = (newParams: Record<string, string>) => {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParams ? searchParams.toString() : "");
     Object.entries(newParams).forEach(([k, v]) => {
       if (!v || v === "ALL") {
         params.delete(k);

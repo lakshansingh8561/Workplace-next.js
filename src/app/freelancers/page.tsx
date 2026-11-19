@@ -11,12 +11,12 @@ export const metadata: Metadata = {
 };
 
 interface FreelancersPageProps {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
 async function FreelancersContent({ searchParams }: FreelancersPageProps) {
   await connection();
-  const resolved = await searchParams;
+  const resolved = (searchParams ? await searchParams : {}) || {};
 
   const query = typeof resolved.query === "string" ? resolved.query : undefined;
   const skill = typeof resolved.skill === "string" ? resolved.skill : undefined;
@@ -42,18 +42,32 @@ async function FreelancersContent({ searchParams }: FreelancersPageProps) {
       : "rating";
   const page = typeof resolved.page === "string" ? parseInt(resolved.page, 10) : 1;
 
-  const initialData = await searchFreelancersAction({
-    query,
-    skill,
-    experience,
-    minRate: isNaN(minRate ?? NaN) ? undefined : minRate,
-    maxRate: isNaN(maxRate ?? NaN) ? undefined : maxRate,
-    isAvailable,
-    minRating: isNaN(minRating ?? NaN) ? undefined : minRating,
-    sort,
-    page: isNaN(page) ? 1 : page,
-    limit: 12,
-  });
+  let initialData;
+  try {
+    initialData = await searchFreelancersAction({
+      query,
+      skill,
+      experience,
+      minRate: isNaN(minRate ?? NaN) ? undefined : minRate,
+      maxRate: isNaN(maxRate ?? NaN) ? undefined : maxRate,
+      isAvailable,
+      minRating: isNaN(minRating ?? NaN) ? undefined : minRating,
+      sort,
+      page: isNaN(page) ? 1 : page,
+      limit: 12,
+    });
+  } catch (error) {
+    console.error("[FreelancersContent Error]:", error);
+    initialData = {
+      success: false,
+      freelancers: [],
+      totalCount: 0,
+      page: 1,
+      totalPages: 1,
+      topSkills: [],
+      error: "Failed to load talent directory. Please try again.",
+    };
+  }
 
   return <FreelancerDiscoveryView initialData={initialData} />;
 }

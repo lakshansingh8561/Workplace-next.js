@@ -10,6 +10,7 @@ import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 export function SignupForm() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [role, setRole] = useState<"CLIENT" | "FREELANCER">("CLIENT");
   const [name, setName] = useState("");
@@ -22,41 +23,83 @@ export function SignupForm() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Guard against duplicate concurrent submissions
+    if (isPending || isSubmitting) return;
+
     setError(null);
     setFieldErrors({});
+    setIsSubmitting(true);
+
+    const safetyTimer = setTimeout(() => {
+      setIsSubmitting(false);
+      setError("Registration request timed out. Please check your network connection and try again.");
+    }, 15000);
 
     startTransition(async () => {
-      // Clear any prior authenticated session to prevent stale cross-user session collisions
       try {
-        await signOut({ redirect: false });
-      } catch {
-        // Safe fallback if unauthenticated
-      }
+        // Fast non-blocking session cleanup only if an active session cookie exists
+        const hasSession =
+          typeof document !== "undefined" &&
+          (document.cookie.includes("authjs.session-token") ||
+            document.cookie.includes("next-auth.session-token"));
 
-      const cleanEmail = email.trim().toLowerCase();
-      const result = await registerUser({
-        name,
-        email: cleanEmail,
-        password,
-        role,
-      });
-
-      if (!result.success) {
-        setError(result.error || "Failed to create account.");
-        if (result.fieldErrors) {
-          setFieldErrors(result.fieldErrors);
-        }
-      } else {
-        try {
-          if (typeof window !== "undefined") {
-            sessionStorage.setItem("workpulse_verify_email", cleanEmail);
-            sessionStorage.setItem("workpulse_verify_role", role);
+        if (hasSession) {
+          try {
+            await Promise.race([
+              signOut({ redirect: false }),
+              new Promise((resolve) => setTimeout(resolve, 800)),
+            ]);
+          } catch {
+            // Non-blocking fallback
           }
-        } catch {
-          // Ignore storage quota/permission restrictions
         }
-        router.push(
-          `/verify-email?email=${encodeURIComponent(cleanEmail)}&role=${role}`
+
+        const cleanEmail = email.trim().toLowerCase();
+        const result = await registerUser({
+          name,
+          email: cleanEmail,
+          password,
+          role,
+        });
+
+        clearTimeout(safetyTimer);
+
+        if (!result.success) {
+          setIsSubmitting(false);
+          setError(result.error || "Failed to create account.");
+          if (result.fieldErrors) {
+            setFieldErrors(result.fieldErrors);
+          }
+        } else {
+          try {
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem("workpulse_verify_email", cleanEmail);
+              sessionStorage.setItem("workpulse_verify_role", role);
+            }
+          } catch {
+            // Ignore storage restrictions
+          }
+
+          const params = new URLSearchParams({
+            email: cleanEmail,
+            role,
+          });
+
+          if (result.emailDelivered === false && result.warning) {
+            params.set("emailFailed", "true");
+            params.set("emailError", result.warning);
+          }
+
+          router.push(`/verify-email?${params.toString()}`);
+        }
+      } catch (err) {
+        clearTimeout(safetyTimer);
+        setIsSubmitting(false);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "An unexpected network error occurred. Please try again."
         );
       }
     });
@@ -243,10 +286,17 @@ export function SignupForm() {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isPending}
-            className="w-full mt-2 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 active:scale-95 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+            disabled={isPending || isSubmitting}
+            className="w-full mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 active:scale-95 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
           >
-            {isPending ? "Creating your account..." : "Create Account with Email"}
+            {isPending || isSubmitting ? (
+              <>
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                <span>Creating your account...</span>
+              </>
+            ) : (
+              "Create Account with Email"
+            )}
           </button>
         </form>
 

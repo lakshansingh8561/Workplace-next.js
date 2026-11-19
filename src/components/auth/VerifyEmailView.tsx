@@ -18,6 +18,8 @@ export function VerifyEmailView() {
   const emailParam = searchParams.get("email") || "";
   const roleParam = searchParams.get("role") as "CLIENT" | "FREELANCER" | null;
   const isRequired = searchParams.get("required") === "true";
+  const emailFailed = searchParams.get("emailFailed") === "true";
+  const emailErrorParam = searchParams.get("emailError");
 
   const [, startTransition] = useTransition();
   const [isOtpPending, startOtpTransition] = useTransition();
@@ -516,6 +518,26 @@ export function VerifyEmailView() {
                 </p>
               )}
             </div>
+
+            {/* Email Provider Delivery Warning Notice */}
+            {emailFailed && (
+              <div
+                role="alert"
+                className="mb-4 rounded-2xl border border-amber-300 bg-amber-50/90 p-4 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200 shadow-sm text-left"
+              >
+                <p className="font-semibold text-amber-900 dark:text-amber-100 mb-1 flex items-center gap-1.5">
+                  <span>⚠️</span>
+                  <span>Verification Email Delivery Notice</span>
+                </p>
+                <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                  {emailErrorParam ||
+                    "We created your account, but the verification email could not be delivered automatically by the configured email provider."}
+                </p>
+                <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-400">
+                  Please verify your email credentials on Render, or click <strong>Resend Code</strong> below.
+                </p>
+              </div>
+            )}
 
             {/* Conflicting Session Notice & One-Click Signout */}
             {hasConflictingSession && (

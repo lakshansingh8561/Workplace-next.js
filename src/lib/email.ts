@@ -44,7 +44,9 @@ export function getEmailProviderStatus(): EmailProviderStatus {
   const emailUser = process.env.EMAIL_USER || process.env.SMTP_USER;
   const emailPass = process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
   const emailFrom = process.env.EMAIL_FROM;
-  const smtpHost = process.env.SMTP_HOST || (emailUser?.includes("@gmail.com") ? "smtp.gmail.com" : undefined);
+  const smtpHost =
+    process.env.SMTP_HOST ||
+    (emailUser?.toLowerCase().includes("@gmail.com") ? "smtp.gmail.com" : undefined);
 
   const presentVariables: string[] = [];
   const missingVariables: string[] = [];
@@ -52,16 +54,26 @@ export function getEmailProviderStatus(): EmailProviderStatus {
   if (resendApiKey) presentVariables.push("RESEND_API_KEY");
   else missingVariables.push("RESEND_API_KEY");
 
-  if (process.env.EMAIL_USER) presentVariables.push("EMAIL_USER");
-  else missingVariables.push("EMAIL_USER");
+  if (emailUser) presentVariables.push(process.env.EMAIL_USER ? "EMAIL_USER" : "SMTP_USER");
+  else missingVariables.push("EMAIL_USER / SMTP_USER");
 
-  if (process.env.EMAIL_PASS) presentVariables.push("EMAIL_PASS");
-  else missingVariables.push("EMAIL_PASS");
+  if (emailPass) {
+    presentVariables.push(
+      process.env.EMAIL_PASS
+        ? "EMAIL_PASS"
+        : process.env.SMTP_PASS
+        ? "SMTP_PASS"
+        : "SMTP_PASSWORD"
+    );
+  } else {
+    missingVariables.push("EMAIL_PASS / SMTP_PASS / SMTP_PASSWORD");
+  }
 
-  if (process.env.EMAIL_FROM) presentVariables.push("EMAIL_FROM");
+  if (emailFrom) presentVariables.push("EMAIL_FROM");
   else missingVariables.push("EMAIL_FROM");
 
   if (process.env.SMTP_HOST) presentVariables.push("SMTP_HOST");
+  else if (emailUser?.toLowerCase().includes("@gmail.com")) presentVariables.push("SMTP_HOST (auto: smtp.gmail.com)");
   else missingVariables.push("SMTP_HOST");
 
   if (process.env.SMTP_PORT) presentVariables.push("SMTP_PORT");
@@ -124,11 +136,19 @@ export async function sendEmail({
   const resendApiKey = process.env.RESEND_API_KEY;
   const emailUser = process.env.EMAIL_USER || process.env.SMTP_USER;
   const emailPass = process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
-  const smtpHost = process.env.SMTP_HOST || (emailUser?.includes("@gmail.com") ? "smtp.gmail.com" : undefined);
-  const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 465;
+  const smtpHost =
+    process.env.SMTP_HOST ||
+    (emailUser?.toLowerCase().includes("@gmail.com") ? "smtp.gmail.com" : undefined);
+  const smtpPort = process.env.SMTP_PORT
+    ? parseInt(process.env.SMTP_PORT, 10)
+    : 587; // Default to port 587 (STARTTLS) which is universally permitted on cloud hosts
   const rawFrom = process.env.EMAIL_FROM || emailUser;
   const fromAddress = rawFrom
-    ? (rawFrom.includes("<") ? rawFrom : `WorkPulse <${rawFrom}>`)
+    ? rawFrom.includes("<")
+      ? rawFrom
+      : `WorkPulse <${rawFrom}>`
+    : resendApiKey
+    ? "WorkPulse <onboarding@resend.dev>"
     : "WorkPulse <noreply@workpulse.internal>";
 
   // Automated test mode bypass (unless explicitly running live verification)
@@ -140,8 +160,11 @@ export async function sendEmail({
     };
   }
 
-  // 1. Production provider integration: Resend API
+  // 1. Production provider integration: Resend API (HTTP POST over port 443)
   if (resendApiKey) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8-second safety timeout
+
     try {
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -156,17 +179,32 @@ export async function sendEmail({
           html,
           text,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = (await response.json().catch(() => ({}))) as {
+          message?: string;
+          name?: string;
+        };
+        const errorMsg = errorData.message || `HTTP ${response.status}`;
         console.error(
-          `[WorkPulse Email Error] Resend API returned HTTP ${response.status}:`,
-          (errorData as { message?: string })?.message || "Unknown provider error"
+          `[WorkPulse Email Error] Resend API returned error (HTTP ${response.status}):`,
+          errorMsg
         );
+
+        let userMsg = `Resend email delivery failed: ${errorMsg}`;
+        if (errorMsg.toLowerCase().includes("domain") && errorMsg.toLowerCase().includes("not verified")) {
+          userMsg =
+            "Email domain is not verified in Resend. Please set EMAIL_FROM to onboarding@resend.dev or verify your domain at resend.com.";
+        } else if (response.status === 401 || response.status === 403) {
+          userMsg = "Resend API key is invalid or unauthorized. Please verify RESEND_API_KEY.";
+        }
+
         return {
           success: false,
-          error: "Email delivery failed with provider error.",
+          error: userMsg,
         };
       }
 
@@ -176,13 +214,16 @@ export async function sendEmail({
         messageId: result.id,
       };
     } catch (err) {
+      clearTimeout(timeoutId);
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      const errMsg = isAbort ? "Connection to Resend API timed out (8s limit)" : err instanceof Error ? err.message : "Network error";
       console.error(
         "[WorkPulse Email Error] Network exception connecting to Resend API:",
-        err instanceof Error ? err.message : "Network error"
+        errMsg
       );
       return {
         success: false,
-        error: "Network error delivering email.",
+        error: isAbort ? "Email provider request timed out. Please try again." : "Network error delivering email.",
       };
     }
   }
@@ -191,30 +232,30 @@ export async function sendEmail({
   if (emailUser && emailPass && smtpHost) {
     try {
       const cleanPass = emailPass.replace(/\s+/g, "");
-      const isGmail = emailUser.includes("@gmail.com") || smtpHost === "smtp.gmail.com";
-      const transporter = nodemailer.createTransport(
-        isGmail
-          ? {
-              service: "gmail",
-              auth: {
-                user: emailUser,
-                pass: cleanPass,
-              },
-            }
-          : {
-              host: smtpHost,
-              port: smtpPort,
-              secure: smtpPort === 465,
-              requireTLS: smtpPort === 587,
-              connectionTimeout: 10000, // 10s timeout
-              greetingTimeout: 10000, // 10s timeout
-              socketTimeout: 15000, // 15s timeout
-              auth: {
-                user: emailUser,
-                pass: cleanPass,
-              },
-            }
-      );
+      const isGmail =
+        emailUser.toLowerCase().includes("@gmail.com") ||
+        smtpHost.toLowerCase() === "smtp.gmail.com";
+
+      const targetHost = isGmail ? "smtp.gmail.com" : smtpHost;
+      const targetPort = smtpPort || 587;
+      const isSecure = targetPort === 465;
+
+      const transporter = nodemailer.createTransport({
+        host: targetHost,
+        port: targetPort,
+        secure: isSecure,
+        requireTLS: !isSecure,
+        connectionTimeout: 8000, // 8s TCP connection timeout (never hangs indefinitely)
+        greetingTimeout: 8000,   // 8s SMTP greeting timeout
+        socketTimeout: 10000,    // 10s socket timeout
+        auth: {
+          user: emailUser.trim(),
+          pass: cleanPass,
+        },
+        tls: {
+          rejectUnauthorized: process.env.NODE_ENV === "production",
+        },
+      });
 
       const info = await transporter.sendMail({
         from: fromAddress,
@@ -231,9 +272,32 @@ export async function sendEmail({
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : "SMTP error";
       console.error("[WorkPulse Email Error] SMTP delivery exception:", errMsg);
+
+      let userFriendlyError = `SMTP email delivery failed: ${errMsg}`;
+      if (
+        errMsg.includes("535") ||
+        errMsg.includes("Username and Password not accepted") ||
+        errMsg.includes("Invalid login") ||
+        errMsg.includes("BadCredentials")
+      ) {
+        userFriendlyError =
+          "Email authentication failed. If using Gmail, please ensure EMAIL_PASS is a 16-character Google App Password (not your personal Google account password).";
+      } else if (
+        errMsg.includes("ETIMEDOUT") ||
+        errMsg.includes("ESOCKETTIMEDOUT") ||
+        errMsg.includes("connection timeout") ||
+        errMsg.includes("Greeting never received")
+      ) {
+        userFriendlyError =
+          "Connection to SMTP server timed out. Render cloud may restrict port 465; please configure SMTP_PORT=587 or use Resend (RESEND_API_KEY).";
+      } else if (errMsg.includes("ECONNREFUSED")) {
+        userFriendlyError =
+          "Connection refused by SMTP server. Please verify SMTP_HOST and SMTP_PORT.";
+      }
+
       return {
         success: false,
-        error: `SMTP email delivery failed: ${errMsg}`,
+        error: userFriendlyError,
       };
     }
   }
@@ -241,11 +305,12 @@ export async function sendEmail({
   // 3. Production fail-safe: Never pretend emails were sent if unconfigured in production
   if (process.env.NODE_ENV === "production") {
     console.error(
-      "[WorkPulse Email Error] No email provider configured in production environment (RESEND_API_KEY or SMTP credentials missing)."
+      "[WorkPulse Email Error] No email provider configured in production environment (Neither RESEND_API_KEY nor SMTP credentials EMAIL_USER/EMAIL_PASS are configured on Render)."
     );
     return {
       success: false,
-      error: "Email service is temporarily unavailable. Please contact support.",
+      error:
+        "Email delivery service is unconfigured in production. Please configure RESEND_API_KEY or SMTP credentials (EMAIL_USER, EMAIL_PASS) in Render environment variables.",
     };
   }
 

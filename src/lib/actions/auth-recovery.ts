@@ -602,16 +602,29 @@ export async function sendEmailVerificationOtpAction(
       });
     });
 
-    // Send email via configured SMTP (or simulation in test mode)
-    await sendEmailVerificationOtp({
+    // Send email via configured provider (Resend or SMTP)
+    const emailResult = await sendEmailVerificationOtp({
       to: email,
       otp,
       recipientName: user?.name,
     });
 
+    if (!emailResult.success) {
+      console.error(
+        "[WorkPulse Send OTP Error] Email provider delivery failure:",
+        emailResult.error
+      );
+      return {
+        success: false,
+        error:
+          emailResult.error ||
+          "Failed to deliver verification code. Please check your email configuration.",
+      };
+    }
+
     return {
       success: true,
-      message: "A 6-digit verification code has been sent to your email address.",
+      message: "A fresh 6-digit verification code has been sent to your email address.",
     };
   } catch (error) {
     console.error(

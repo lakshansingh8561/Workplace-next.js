@@ -25,6 +25,8 @@ export type AuthActionResult = {
   fieldErrors?: Record<string, string>;
   message?: string;
   role?: Role;
+  emailDelivered?: boolean;
+  warning?: string;
 };
 
 /**
@@ -117,21 +119,45 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
         },
       });
 
-      await sendEmailVerificationOtp({
+      const emailResult = await sendEmailVerificationOtp({
         to: newUser.email,
         otp,
         recipientName: newUser.name,
       });
+
+      if (!emailResult.success) {
+        console.warn(
+          "[WorkPulse Verification Email Warning] User created, but OTP delivery failed:",
+          emailResult.error
+        );
+        return {
+          success: true,
+          emailDelivered: false,
+          warning:
+            emailResult.error ||
+            "Account created, but verification email could not be delivered. Please check your email configuration or click Resend Code.",
+          message:
+            "Account created. The 6-digit verification code could not be delivered automatically.",
+        };
+      }
     } catch (emailErr) {
-      // Do not fail account registration if email queueing encounters non-fatal error
       console.error(
         "[WorkPulse Verification Email Error]:",
         emailErr instanceof Error ? emailErr.message : "Failed to queue verification email"
       );
+      return {
+        success: true,
+        emailDelivered: false,
+        warning:
+          "Account created, but an error occurred while sending the verification email. Please request a new code.",
+        message:
+          "Account created, but verification email could not be delivered.",
+      };
     }
 
     return {
       success: true,
+      emailDelivered: true,
       message:
         "Account created successfully. A 6-digit verification code has been sent to your email.",
     };
