@@ -10,9 +10,6 @@ import {
   ClientDashboardFreelancer,
 } from "@/components/dashboard/ClientDashboardView";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export const metadata: Metadata = {
   title: "Client Dashboard | WorkPulse",
   description: "Manage your posted freelance jobs, contract statuses, and applicant proposals.",

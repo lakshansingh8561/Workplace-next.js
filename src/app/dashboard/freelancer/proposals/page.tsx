@@ -7,9 +7,6 @@ import { Role } from "@/types";
 import { getFreelancerProposals } from "@/lib/actions/proposal";
 import { FreelancerProposalsView } from "@/components/dashboard/FreelancerProposalsView";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export const metadata: Metadata = {
   title: "My Proposals | WorkPulse",
   description:

@@ -5,9 +5,6 @@ import { requireVerifiedUser } from "@/lib/session";
 import { Role } from "@/types";
 import { PostJobForm } from "@/components/jobs/PostJobForm";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export const metadata: Metadata = {
   title: "Post a Freelance Job | WorkPulse Marketplace",
   description: "Create and publish a new contract requirement to hire top independent talent.",

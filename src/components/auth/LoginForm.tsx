@@ -22,7 +22,7 @@ export function LoginForm() {
   const redirectTo = sanitizeRedirectPath(searchParams.get("redirectTo"));
 
   const [isPending, startTransition] = useTransition();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => searchParams.get("email")?.trim() || "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);

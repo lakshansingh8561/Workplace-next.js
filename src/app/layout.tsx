@@ -17,8 +17,6 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const dynamic = "force-dynamic";
-
 export const metadata: Metadata = {
   title: "WorkPulse | Upwork-Inspired Freelance Marketplace",
   description:

@@ -369,6 +369,25 @@ export function VerifyEmailView() {
     });
   };
 
+  const handleNavigateAfterVerification = () => {
+    const targetNorm = (emailParam || email).trim().toLowerCase();
+    if (activeSessionEmail && activeSessionEmail === targetNorm) {
+      const dest = userRole === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer";
+      if (typeof window !== "undefined") {
+        window.location.href = dest;
+      } else {
+        router.push(dest);
+      }
+    } else {
+      const loginUrl = `/login?verified=true${targetNorm ? `&email=${encodeURIComponent(targetNorm)}` : ""}`;
+      if (typeof window !== "undefined") {
+        window.location.href = loginUrl;
+      } else {
+        router.push(loginUrl);
+      }
+    }
+  };
+
   const targetEmailNormalized = (emailParam || email).trim().toLowerCase();
   const hasConflictingSession =
     Boolean(activeSessionEmail) &&
@@ -433,15 +452,7 @@ export function VerifyEmailView() {
             <div className="pt-3">
               <button
                 type="button"
-                onClick={() => {
-                  const targetNorm = (emailParam || email).trim().toLowerCase();
-                  if (activeSessionEmail && activeSessionEmail === targetNorm) {
-                    router.push(userRole === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer");
-                  } else {
-                    router.push("/login?verified=true");
-                  }
-                  router.refresh();
-                }}
+                onClick={handleNavigateAfterVerification}
                 className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
               >
                 {activeSessionEmail && activeSessionEmail === (emailParam || email).trim().toLowerCase()
@@ -481,15 +492,7 @@ export function VerifyEmailView() {
             <div className="pt-3">
               <button
                 type="button"
-                onClick={() => {
-                  const targetNorm = (emailParam || email).trim().toLowerCase();
-                  if (activeSessionEmail && activeSessionEmail === targetNorm) {
-                    router.push(userRole === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer");
-                  } else {
-                    router.push("/login?verified=true");
-                  }
-                  router.refresh();
-                }}
+                onClick={handleNavigateAfterVerification}
                 className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
               >
                 {activeSessionEmail && activeSessionEmail === (emailParam || email).trim().toLowerCase()

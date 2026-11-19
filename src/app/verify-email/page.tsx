@@ -2,9 +2,6 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { VerifyEmailView } from "@/components/auth/VerifyEmailView";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export const metadata: Metadata = {
   title: "Verify Email | WorkPulse",
   description: "Confirm your email address for your WorkPulse account.",

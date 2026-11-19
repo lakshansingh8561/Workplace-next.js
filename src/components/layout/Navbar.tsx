@@ -7,7 +7,7 @@ import { logoutUser } from "@/lib/actions/auth";
 import { SessionUser } from "@/lib/session";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { Avatar } from "@/components/ui/Avatar";
-import { useAppDispatch, useAppSelector } from "@/lib/store";
+import { useAppDispatch } from "@/lib/store";
 import { setCredentials, clearCredentials } from "@/lib/store/slices/authSlice";
 import { disconnectSocket } from "@/lib/socket/client";
 
@@ -473,34 +473,70 @@ function NavigationObserver({ onNavigate }: { onNavigate: () => void }) {
 }
 
 export function Navbar({ user }: NavbarProps) {
+  const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const dispatch = useAppDispatch();
-  const reduxUser = useAppSelector((state) => state.auth.user);
+  const [liveUser, setLiveUser] = useState<SessionUser | null | undefined>(user);
 
-  // Authoritative server-side identity:
-  // If user prop is explicitly passed (either object or null), it takes precedence over client Redux cache.
-  // Only when user prop is undefined (e.g. before initial server render) do we check reduxUser.
+  // Synchronize when server updates the prop
+  useEffect(() => {
+    setLiveUser(user);
+  }, [user]);
+
+  // Proactively verify and synchronize live authenticated session on mount and on every route transition.
+  // Next.js App Router preserves RootLayout across client navigations; querying the live session
+  // guarantees that the Navbar reflects the true active identity immediately, never displaying a stale previous user.
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((session) => {
+        if (!active) return;
+        if (session?.user?.id) {
+          const fresh: SessionUser = {
+            id: session.user.id,
+            name: session.user.name ?? null,
+            email: session.user.email ?? "",
+            image: session.user.image ?? null,
+            role: (session.user.role as "CLIENT" | "FREELANCER") ?? "CLIENT",
+            roleSelected: session.user.roleSelected !== false,
+            emailVerified: session.user.emailVerified ? new Date(session.user.emailVerified) : null,
+          };
+          setLiveUser(fresh);
+          dispatch(
+            setCredentials({
+              id: fresh.id,
+              name: fresh.name,
+              email: fresh.email,
+              image: fresh.image,
+              role: fresh.role as "CLIENT" | "FREELANCER",
+              roleSelected: fresh.roleSelected,
+              emailVerified: fresh.emailVerified
+                ? new Date(fresh.emailVerified).toISOString()
+                : null,
+            })
+          );
+        } else {
+          // Unauthenticated session
+          setLiveUser(null);
+          dispatch(clearCredentials());
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, [pathname, dispatch]);
+
+  // Authoritative identity: strictly derived from live validated session or server prop.
+  // Never falls back to a zombie Redux cache if the live session is absent.
   const effectiveUser: SessionUser | null =
-    user !== undefined
-      ? user
-      : reduxUser
-      ? ({
-          id: reduxUser.id,
-          name: reduxUser.name ?? null,
-          email: reduxUser.email ?? "",
-          image: reduxUser.image ?? null,
-          role: (reduxUser.role as "CLIENT" | "FREELANCER") ?? "CLIENT",
-          roleSelected: Boolean(reduxUser.roleSelected),
-          emailVerified: reduxUser.emailVerified ? new Date(reduxUser.emailVerified) : null,
-        } as SessionUser)
-      : null;
+    liveUser !== undefined ? liveUser : user !== undefined ? user : null;
 
-  const currentImage =
-    reduxUser?.id === effectiveUser?.id && reduxUser?.image !== undefined
-      ? reduxUser.image
-      : effectiveUser?.image;
+  const currentImage = effectiveUser?.image || null;
 
   const handleRouteChange = useCallback(() => {
     setIsMobileMenuOpen(false);
@@ -534,27 +570,6 @@ export function Navbar({ user }: NavbarProps) {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isUserMenuOpen]);
-
-  useEffect(() => {
-    if (user) {
-      dispatch(
-        setCredentials({
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          image: user.image,
-          role: user.role as "CLIENT" | "FREELANCER",
-          roleSelected: user.roleSelected,
-          emailVerified: user.emailVerified
-            ? new Date(user.emailVerified).toISOString()
-            : null,
-        })
-      );
-    } else if (user === null) {
-      // Authoritative server state: user is unauthenticated
-      dispatch(clearCredentials());
-    }
-  }, [user, dispatch]);
 
   const closeMenu = () => {
     // Defer unmounting dropdowns slightly so click events finish dispatching to Next.js router

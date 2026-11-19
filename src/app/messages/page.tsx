@@ -9,9 +9,6 @@ import {
 } from "@/lib/actions/message";
 import { MessagingLayout } from "@/components/messages/MessagingLayout";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export const metadata: Metadata = {
   title: "Messages | WorkPulse",
   description: "Secure contract messaging and collaboration between clients and freelancers on WorkPulse.",

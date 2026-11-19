@@ -93,7 +93,13 @@ export function SignupForm() {
             params.set("emailError", result.warning);
           }
 
-          router.push(`/verify-email?${params.toString()}`);
+          const destination = `/verify-email?${params.toString()}`;
+          // Full browser reload flushes any prior client router cache and RootLayout session state
+          if (typeof window !== "undefined") {
+            window.location.href = destination;
+          } else {
+            router.push(destination);
+          }
         }
       } catch (err) {
         clearTimeout(safetyTimer);
