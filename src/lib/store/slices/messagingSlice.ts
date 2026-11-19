@@ -5,6 +5,9 @@ export interface MessagingState {
   unreadConversationCount: number;
   draftMessages: Record<string, string>;
   isChatSidebarOpen: boolean;
+  onlineUsers: Record<string, boolean>;
+  typingUsers: Record<string, Record<string, { isTyping: boolean; name?: string }>>;
+  connectionStatus: "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "RECONNECTING";
 }
 
 const initialState: MessagingState = {
@@ -12,6 +15,9 @@ const initialState: MessagingState = {
   unreadConversationCount: 0,
   draftMessages: {},
   isChatSidebarOpen: false,
+  onlineUsers: {},
+  typingUsers: {},
+  connectionStatus: "DISCONNECTED",
 };
 
 export const messagingSlice = createSlice({
@@ -36,6 +42,50 @@ export const messagingSlice = createSlice({
     setChatSidebarOpen: (state, action: PayloadAction<boolean>) => {
       state.isChatSidebarOpen = action.payload;
     },
+    setConnectionStatus: (
+      state,
+      action: PayloadAction<"DISCONNECTED" | "CONNECTING" | "CONNECTED" | "RECONNECTING">
+    ) => {
+      state.connectionStatus = action.payload;
+    },
+    setOnlineUsers: (state, action: PayloadAction<string[]>) => {
+      const map: Record<string, boolean> = {};
+      action.payload.forEach((id) => {
+        map[id] = true;
+      });
+      state.onlineUsers = map;
+    },
+    setUserOnline: (state, action: PayloadAction<string>) => {
+      state.onlineUsers[action.payload] = true;
+    },
+    setUserOffline: (state, action: PayloadAction<string>) => {
+      delete state.onlineUsers[action.payload];
+    },
+    setUserTyping: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        userId: string;
+        isTyping: boolean;
+        name?: string | null;
+      }>
+    ) => {
+      const { conversationId, userId, isTyping, name } = action.payload;
+      if (!state.typingUsers[conversationId]) {
+        state.typingUsers[conversationId] = {};
+      }
+      if (isTyping) {
+        state.typingUsers[conversationId][userId] = {
+          isTyping: true,
+          name: name || undefined,
+        };
+      } else {
+        delete state.typingUsers[conversationId][userId];
+      }
+    },
+    clearTypingForConversation: (state, action: PayloadAction<string>) => {
+      delete state.typingUsers[action.payload];
+    },
   },
 });
 
@@ -45,7 +95,12 @@ export const {
   saveDraftMessage,
   clearDraftMessage,
   setChatSidebarOpen,
+  setConnectionStatus,
+  setOnlineUsers,
+  setUserOnline,
+  setUserOffline,
+  setUserTyping,
+  clearTypingForConversation,
 } = messagingSlice.actions;
 
 export default messagingSlice.reducer;
-

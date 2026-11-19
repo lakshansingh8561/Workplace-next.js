@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { ConversationSummaryDto } from "@/lib/actions/message";
 import { Avatar } from "@/components/ui/Avatar";
+import { useAppSelector } from "@/lib/store";
 
 interface ConversationListProps {
   conversations: ConversationSummaryDto[];
@@ -18,6 +19,9 @@ export function ConversationList({
   const [searchQuery, setSearchQuery] = useState("");
   const [tabFilter, setTabFilter] = useState<"ALL" | "CONTRACTS" | "PRE_HIRE">("ALL");
   const [mounted, setMounted] = useState(false);
+
+  const onlineUsers = useAppSelector((state) => state.messaging.onlineUsers);
+  const typingMap = useAppSelector((state) => state.messaging.typingUsers);
 
   useEffect(() => {
     setMounted(true);
@@ -178,6 +182,12 @@ export function ConversationList({
               ? c.job?.title || c.contract.title
               : c.contract.title;
 
+            const isCounterpartyOnline = Boolean(c.counterparty.id && onlineUsers[c.counterparty.id]);
+            const isTyping = Boolean(
+              c.counterparty.id &&
+                typingMap[c.id]?.[c.counterparty.id]?.isTyping
+            );
+
             return (
               <button
                 key={c.id}
@@ -197,6 +207,13 @@ export function ConversationList({
                     role={c.counterparty.role}
                     userId={c.counterparty.id}
                     size="sm"
+                  />
+                  {/* Real-time online presence dot */}
+                  <span
+                    className={`absolute bottom-0 right-0 h-2 w-2 rounded-full ring-2 ring-white dark:ring-zinc-900 ${
+                      isCounterpartyOnline ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                    }`}
+                    title={isCounterpartyOnline ? "Online" : "Offline"}
                   />
                   {c.unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-emerald-600 px-1 text-[9px] font-bold text-white shadow-xs">
@@ -233,15 +250,19 @@ export function ConversationList({
                     </span>
                   </div>
 
-                  {/* Last message preview */}
+                  {/* Last message preview or live typing notice */}
                   <p
                     className={`text-[11px] truncate block ${
-                      c.unreadCount > 0
+                      isTyping
+                        ? "font-semibold text-emerald-600 dark:text-emerald-400 italic animate-pulse"
+                        : c.unreadCount > 0
                         ? "font-semibold text-zinc-900 dark:text-zinc-100"
                         : "text-zinc-500 dark:text-zinc-400"
                     }`}
                   >
-                    {c.lastMessageSnippet || "No messages yet. Send a hello!"}
+                    {isTyping
+                      ? "typing..."
+                      : c.lastMessageSnippet || "No messages yet. Send a hello!"}
                   </p>
                 </div>
               </button>

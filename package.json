@@ -12,7 +12,8 @@
     "db:seed": "prisma db seed",
     "test": "vitest run",
     "test:unit": "vitest run",
-    "test:integration": "node ./scripts/run_integration_tests.js"
+    "test:integration": "node ./scripts/run_integration_tests.js",
+    "socket:server": "tsx src/server/socket-standalone.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -31,6 +32,8 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-redux": "^9.3.1",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {

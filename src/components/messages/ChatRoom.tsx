@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useTransition, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import {
   getMessagesAction,
@@ -13,7 +13,9 @@ import {
   setActiveConversationId,
   saveDraftMessage,
   clearDraftMessage,
+  setUserTyping,
 } from "@/lib/store/slices/messagingSlice";
+import { getSocket } from "@/lib/socket/client";
 
 interface ChatRoomProps {
   conversationId: string;
@@ -31,6 +33,11 @@ export function ChatRoom({
   const dispatch = useAppDispatch();
   const existingDraft = useAppSelector(
     (state) => state.messaging.draftMessages[conversationId] || ""
+  );
+
+  const onlineUsers = useAppSelector((state) => state.messaging.onlineUsers);
+  const typingMap = useAppSelector(
+    (state) => state.messaging.typingUsers[conversationId] || {}
   );
 
   const [messages, setMessages] = useState<ChatMessageDto[]>([]);
@@ -66,6 +73,9 @@ export function ChatRoom({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
 
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+
   // Sync active conversation with Redux store
   useEffect(() => {
     dispatch(setActiveConversationId(conversationId));
@@ -73,8 +83,6 @@ export function ChatRoom({
       dispatch(setActiveConversationId(null));
     };
   }, [conversationId, dispatch]);
-
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (messagesContainerRef.current) {
@@ -85,7 +93,7 @@ export function ChatRoom({
     }
   }, []);
 
-  // Initial load when conversationId changes
+  // Initial load of messages when conversationId changes
   useEffect(() => {
     let ignore = false;
 
@@ -112,7 +120,7 @@ export function ChatRoom({
         if (!ignore) {
           setErrorMessage("Failed to load conversation history.");
         }
-        console.error("Messages fetch error:", err);
+        console.error("[WorkPulse Messaging] History fetch error:", err);
       } finally {
         if (!ignore) {
           setIsLoading(false);
@@ -127,39 +135,152 @@ export function ChatRoom({
     };
   }, [conversationId, scrollToBottom]);
 
-  // Sane background polling: poll every 6s only when tab is visible
+  // Socket.IO Real-Time Subscription (WhatsApp-like immediate delivery, typing & read receipts)
   useEffect(() => {
-    let ignore = false;
+    let isCancelled = false;
 
-    const interval = setInterval(async () => {
-      if (document.visibilityState === "visible") {
+    async function setupSocketSubscription() {
+      const socket = await getSocket();
+      if (!socket || isCancelled) return;
+
+      // Join conversation room
+      socket.emit("conversation:join", { conversationId }, (res) => {
+        if (res && !res.success) {
+          console.warn("[WorkPulse Socket Join Warning]:", res.error);
+        }
+      });
+
+      // Mark conversation as read on initial open
+      socket.emit("message:read", { conversationId });
+
+      // Handle incoming messages
+      const handleNewMessage = (msg: ChatMessageDto) => {
+        if (msg.conversationId !== conversationId) return;
+
+        setMessages((prev) => {
+          // Check if message already exists (e.g. by persistent ID or optimistic match)
+          const alreadyExists = prev.some(
+            (m) =>
+              m.id === msg.id ||
+              (m.senderId === msg.senderId &&
+                m.content === msg.content &&
+                Math.abs(new Date(m.createdAt).getTime() - new Date(msg.createdAt).getTime()) < 3000)
+          );
+
+          if (alreadyExists) {
+            return prev.map((m) =>
+              m.id === msg.id ||
+              (m.senderId === msg.senderId && m.content === msg.content && m.id.startsWith("client_"))
+                ? msg
+                : m
+            );
+          }
+
+          return [...prev, msg];
+        });
+
+        setTimeout(() => scrollToBottom("smooth"), 50);
+
+        // If message is from counterparty, emit read receipt immediately
+        if (msg.senderId !== currentUserId) {
+          socket.emit("message:read", { conversationId });
+        }
+
+        // Notify parent layout to refresh conversation snippet
+        if (onMessageSent) {
+          try {
+            onMessageSent();
+          } catch {
+            // Non-blocking
+          }
+        }
+      };
+
+      // Handle typing indicator updates
+      const handleTypingUpdate = (payload: {
+        conversationId: string;
+        userId: string;
+        isTyping: boolean;
+        userName?: string | null;
+      }) => {
+        if (payload.conversationId === conversationId && payload.userId !== currentUserId) {
+          dispatch(
+            setUserTyping({
+              conversationId,
+              userId: payload.userId,
+              isTyping: payload.isTyping,
+              name: payload.userName,
+            })
+          );
+        }
+      };
+
+      // Handle read receipts
+      const handleReadReceipt = (payload: {
+        conversationId: string;
+        readerId: string;
+        readAt: string;
+      }) => {
+        if (payload.conversationId === conversationId && payload.readerId !== currentUserId) {
+          setMessages((prev) =>
+            prev.map((m) => (m.senderId === currentUserId ? { ...m, read: true } : m))
+          );
+        }
+      };
+
+      // Handle reconnect: rejoin room and reconcile latest messages
+      const handleReconnect = async () => {
+        socket.emit("conversation:join", { conversationId });
         try {
-          // Optimized polling: fetch only latest 10 messages instead of 50 to minimize DB and payload overhead
-          const res = await getMessagesAction(conversationId, 10);
-          if (!ignore && res.success && res.messages) {
+          const res = await getMessagesAction(conversationId, 15);
+          if (res.success && res.messages) {
             setMessages((prev) => {
               const existingIds = new Set(prev.map((m) => m.id));
               const newArrivals = res.messages!.filter((m) => !existingIds.has(m.id));
               if (newArrivals.length === 0) return prev;
               return [...prev, ...newArrivals];
             });
-            if (res.conversation) {
-              setConversation(res.conversation);
-            }
           }
         } catch (err) {
-          console.error("Polling message update error:", err);
+          console.warn("[WorkPulse Socket Reconnect Reconciliation Warning]:", err);
         }
-      }
-    }, 6000);
+      };
+
+      socket.on("message:new", handleNewMessage);
+      socket.on("typing:update", handleTypingUpdate);
+      socket.on("message:read_receipt", handleReadReceipt);
+      socket.on("connect", handleReconnect);
+
+      return () => {
+        socket.off("message:new", handleNewMessage);
+        socket.off("typing:update", handleTypingUpdate);
+        socket.off("message:read_receipt", handleReadReceipt);
+        socket.off("connect", handleReconnect);
+        socket.emit("conversation:leave", { conversationId });
+      };
+    }
+
+    let cleanupPromise = setupSocketSubscription();
 
     return () => {
-      ignore = true;
-      clearInterval(interval);
+      isCancelled = true;
+      cleanupPromise.then((cleanup) => {
+        if (typeof cleanup === "function") {
+          cleanup();
+        }
+      });
+      // Clear typing indicator for current conversation on unmount
+      dispatch(
+        setUserTyping({
+          conversationId,
+          userId: currentUserId,
+          isTyping: false,
+        })
+      );
     };
-  }, [conversationId]);
+  }, [conversationId, currentUserId, dispatch, onMessageSent, scrollToBottom]);
 
-  // Load older messages (cursor pagination)
+  // Load older messages (cursor pagination preserved)
   const handleLoadOlderMessages = async () => {
     if (!nextCursor || isLoadingOlder) return;
     setIsLoadingOlder(true);
@@ -179,13 +300,42 @@ export function ChatRoom({
         setNextCursor(res.nextCursor || null);
       }
     } catch (err) {
-      console.error("Error loading older messages:", err);
+      console.error("[WorkPulse Messaging] Error loading older messages:", err);
     } finally {
       setIsLoadingOlder(false);
     }
   };
 
-  // Send message
+  // Helper to emit typing state to Socket.IO
+  const handleInputChange = (val: string) => {
+    setInputContent(val);
+    dispatch(saveDraftMessage({ conversationId, text: val }));
+
+    getSocket().then((socket) => {
+      if (!socket || !socket.connected) return;
+
+      if (val.trim()) {
+        socket.emit("typing:start", { conversationId });
+
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+        }
+
+        typingTimeoutRef.current = setTimeout(() => {
+          socket.emit("typing:stop", { conversationId });
+          typingTimeoutRef.current = null;
+        }, 2500);
+      } else {
+        socket.emit("typing:stop", { conversationId });
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = null;
+        }
+      }
+    });
+  };
+
+  // Real-Time Message Sending with Optimistic UI & Socket.IO
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
@@ -202,35 +352,99 @@ export function ChatRoom({
     setErrorMessage(null);
     setIsSending(true);
 
-    try {
-      const res = await sendMessageAction({
-        conversationId,
-        content: trimmed,
-      });
+    // Stop typing indicator on send
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    getSocket().then((socket) => {
+      if (socket && socket.connected) {
+        socket.emit("typing:stop", { conversationId });
+      }
+    });
 
-      if (res.success && res.message) {
-        setInputContent("");
-        dispatch(clearDraftMessage(conversationId));
-        setMessages((prev) => {
-          const exists = prev.some((m) => m.id === res.message!.id);
-          return exists ? prev : [...prev, res.message!];
+    const clientMessageId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    // Optimistic message displayed immediately
+    const optimisticMessage: ChatMessageDto = {
+      id: clientMessageId,
+      conversationId,
+      senderId: currentUserId,
+      content: trimmed,
+      read: false,
+      createdAt: new Date().toISOString(),
+      sender: {
+        id: currentUserId,
+        name: "You",
+        image: null,
+      },
+    };
+
+    setInputContent("");
+    dispatch(clearDraftMessage(conversationId));
+    setMessages((prev) => [...prev, optimisticMessage]);
+    setTimeout(() => scrollToBottom("smooth"), 50);
+
+    const fallbackToServerAction = async () => {
+      try {
+        const res = await sendMessageAction({
+          conversationId,
+          content: trimmed,
         });
-        setIsSending(false);
-        setTimeout(() => scrollToBottom("smooth"), 50);
-        if (onMessageSent) {
-          try {
-            onMessageSent();
-          } catch {
-            // Non-blocking
+
+        if (res.success && res.message) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === clientMessageId ? res.message! : m))
+          );
+          if (onMessageSent) {
+            try {
+              onMessageSent();
+            } catch {
+              // Non-blocking
+            }
           }
+        } else {
+          setErrorMessage(res.error || "Failed to send message. Please try again.");
+          setMessages((prev) => prev.filter((m) => m.id !== clientMessageId));
         }
-      } else {
+      } catch {
+        setErrorMessage("Failed to send message. Please try again.");
+        setMessages((prev) => prev.filter((m) => m.id !== clientMessageId));
+      } finally {
         setIsSending(false);
-        setErrorMessage(res.error || "Failed to send message. Please try again.");
+      }
+    };
+
+    try {
+      const socket = await getSocket();
+      if (socket && socket.connected) {
+        socket.emit(
+          "message:send",
+          { conversationId, content: trimmed, clientMessageId },
+          (response) => {
+            setIsSending(false);
+            if (response && response.success && response.message) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === clientMessageId ? response.message! : m))
+              );
+              if (onMessageSent) {
+                try {
+                  onMessageSent();
+                } catch {
+                  // Non-blocking
+                }
+              }
+            } else {
+              fallbackToServerAction();
+            }
+          }
+        );
+      } else {
+        // Socket offline, fallback seamlessly to server action
+        await fallbackToServerAction();
       }
     } catch {
-      setIsSending(false);
-      setErrorMessage("Failed to send message. Please try again.");
+      await fallbackToServerAction();
     }
   };
 
@@ -265,6 +479,12 @@ export function ChatRoom({
 
   const isPreHire = conversation?.type === "PRE_HIRE";
   const isContract = conversation?.type === "CONTRACT";
+  const counterpartyId = conversation?.counterparty.id;
+  const isCounterpartyOnline = Boolean(counterpartyId && onlineUsers[counterpartyId]);
+
+  // Check if counterparty is typing
+  const counterpartyTypingEntry = counterpartyId ? typingMap[counterpartyId] : null;
+  const isCounterpartyTyping = Boolean(counterpartyTypingEntry?.isTyping);
 
   return (
     <div className="flex flex-col h-full w-full min-w-0 overflow-hidden bg-zinc-50/90 dark:bg-zinc-950">
@@ -285,13 +505,22 @@ export function ChatRoom({
 
             {conversation ? (
               <div className="flex items-center gap-2.5 min-w-0">
-                <Avatar
-                  src={conversation.counterparty.image}
-                  name={conversation.counterparty.name}
-                  role={conversation.counterparty.role}
-                  userId={conversation.counterparty.id}
-                  size="sm"
-                />
+                <div className="relative">
+                  <Avatar
+                    src={conversation.counterparty.image}
+                    name={conversation.counterparty.name}
+                    role={conversation.counterparty.role}
+                    userId={conversation.counterparty.id}
+                    size="sm"
+                  />
+                  {/* Real-time Presence Badge */}
+                  <span
+                    className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 ${
+                      isCounterpartyOnline ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"
+                    }`}
+                    title={isCounterpartyOnline ? "Online" : "Offline"}
+                  />
+                </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Link
@@ -318,6 +547,16 @@ export function ChatRoom({
                       {conversation.counterparty.role === "CLIENT"
                         ? "Client"
                         : "Freelancer"}
+                    </span>
+                    {/* Live Online Indicator */}
+                    <span
+                      className={`text-[10px] font-semibold flex items-center gap-1 ${
+                        isCounterpartyOnline
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-zinc-400 dark:text-zinc-500"
+                      }`}
+                    >
+                      {isCounterpartyOnline ? "• Online" : "• Offline"}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 text-xs text-zinc-500 truncate mt-0.5">
@@ -574,7 +813,9 @@ export function ChatRoom({
 
                     {isMe && (
                       <div className="mt-0.5 px-1 flex items-center gap-1 text-[9px] text-zinc-400">
-                        {m.read ? (
+                        {m.id.startsWith("client_") ? (
+                          <span className="text-zinc-400 italic">Sending...</span>
+                        ) : m.read ? (
                           <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
                             ✓✓ Read
                           </span>
@@ -587,6 +828,20 @@ export function ChatRoom({
                 </div>
               );
             })}
+
+            {/* Real-time Typing Indicator in Message Feed */}
+            {isCounterpartyTyping && (
+              <div className="flex items-center gap-2 py-1 px-2 text-xs text-zinc-500 animate-pulse">
+                <span className="flex gap-1 items-center">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce" />
+                </span>
+                <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                  {conversation?.counterparty.name || "Counterparty"} is typing...
+                </span>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -599,9 +854,8 @@ export function ChatRoom({
         <button
           type="button"
           onClick={() =>
-            setInputContent(
-              (prev) =>
-                (prev ? prev + "\n" : "") +
+            handleInputChange(
+              (inputContent ? inputContent + "\n" : "") +
                 "Could we clarify the core deliverables, project scope, and key acceptance criteria?"
             )
           }
@@ -612,9 +866,8 @@ export function ChatRoom({
         <button
           type="button"
           onClick={() =>
-            setInputContent(
-              (prev) =>
-                (prev ? prev + "\n" : "") +
+            handleInputChange(
+              (inputContent ? inputContent + "\n" : "") +
                 "Let's align on the proposed milestones, rate expectations, and payment schedule."
             )
           }
@@ -625,9 +878,8 @@ export function ChatRoom({
         <button
           type="button"
           onClick={() =>
-            setInputContent(
-              (prev) =>
-                (prev ? prev + "\n" : "") +
+            handleInputChange(
+              (inputContent ? inputContent + "\n" : "") +
                 "What is your target deadline and estimated availability for each project phase?"
             )
           }
@@ -638,9 +890,8 @@ export function ChatRoom({
         <button
           type="button"
           onClick={() =>
-            setInputContent(
-              (prev) =>
-                (prev ? prev + "\n" : "") +
+            handleInputChange(
+              (inputContent ? inputContent + "\n" : "") +
                 "How many rounds of revisions are included in this arrangement?"
             )
           }
@@ -657,11 +908,7 @@ export function ChatRoom({
             <textarea
               rows={2}
               value={inputContent}
-              onChange={(e) => {
-                const val = e.target.value;
-                setInputContent(val);
-                dispatch(saveDraftMessage({ conversationId, text: val }));
-              }}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Type your message... (Press Enter to send, Shift+Enter for newline)"
               className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50/70 p-3 text-xs text-zinc-900 placeholder-zinc-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-white dark:placeholder-zinc-500 transition"

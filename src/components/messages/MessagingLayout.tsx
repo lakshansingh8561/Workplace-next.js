@@ -10,6 +10,13 @@ import {
   getConversationsAction,
   getOrCreateConversationForContractAction,
 } from "@/lib/actions/message";
+import { useAppDispatch } from "@/lib/store";
+import {
+  setOnlineUsers,
+  setUserOnline,
+  setUserOffline,
+} from "@/lib/store/slices/messagingSlice";
+import { getSocket } from "@/lib/socket/client";
 
 interface MessagingLayoutProps {
   initialConversations: ConversationSummaryDto[];
@@ -26,6 +33,7 @@ export function MessagingLayout({
 }: MessagingLayoutProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const dispatch = useAppDispatch();
 
   const [conversations, setConversations] =
     useState<ConversationSummaryDto[]>(initialConversations);
@@ -97,6 +105,87 @@ export function MessagingLayout({
     };
   }, [queryContractId, conversations, refreshConversations]);
 
+  // Socket.IO presence & conversation update listeners
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function setupSocket() {
+      const socket = await getSocket();
+      if (!socket || isCancelled) return;
+
+      const handlePresenceInit = ({ onlineUserIds }: { onlineUserIds: string[] }) => {
+        dispatch(setOnlineUsers(onlineUserIds));
+      };
+
+      const handlePresenceOnline = ({ userId }: { userId: string }) => {
+        dispatch(setUserOnline(userId));
+      };
+
+      const handlePresenceOffline = ({ userId }: { userId: string }) => {
+        dispatch(setUserOffline(userId));
+      };
+
+      const handleConversationUpdated = (payload: {
+        conversationId: string;
+        lastMessageSnippet: string;
+        lastMessageAt: string;
+        senderId: string;
+      }) => {
+        setConversations((prev) => {
+          const targetIndex = prev.findIndex((c) => c.id === payload.conversationId);
+          if (targetIndex === -1) {
+            refreshConversations();
+            return prev;
+          }
+
+          const existing = prev[targetIndex];
+          const isCurrentlyActive = existing.id === (selectedId || queryConvId);
+          const updatedItem = {
+            ...existing,
+            lastMessageSnippet: payload.lastMessageSnippet,
+            lastMessageAt: payload.lastMessageAt,
+            unreadCount: isCurrentlyActive
+              ? 0
+              : payload.senderId !== currentUserId
+              ? existing.unreadCount + 1
+              : existing.unreadCount,
+          };
+
+          // Float updated conversation to the top
+          const next = [
+            updatedItem,
+            ...prev.slice(0, targetIndex),
+            ...prev.slice(targetIndex + 1),
+          ];
+          return next;
+        });
+      };
+
+      socket.on("presence:init", handlePresenceInit);
+      socket.on("presence:online", handlePresenceOnline);
+      socket.on("presence:offline", handlePresenceOffline);
+      socket.on("conversation:updated", handleConversationUpdated);
+
+      return () => {
+        socket.off("presence:init", handlePresenceInit);
+        socket.off("presence:online", handlePresenceOnline);
+        socket.off("presence:offline", handlePresenceOffline);
+        socket.off("conversation:updated", handleConversationUpdated);
+      };
+    }
+
+    let cleanupPromise = setupSocket();
+
+    return () => {
+      isCancelled = true;
+      cleanupPromise.then((cleanup) => {
+        if (typeof cleanup === "function") {
+          cleanup();
+        }
+      });
+    };
+  }, [currentUserId, dispatch, queryConvId, refreshConversations, selectedId]);
+
   // Derive active conversation ID from:
   // 1. Direct local selection (user clicked in list)
   // 2. Query param ?conversationId=
@@ -117,6 +206,9 @@ export function MessagingLayout({
   const handleSelectConversation = (id: string) => {
     setSelectedId(id);
     setResolutionError(null);
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c))
+    );
     router.push(`/messages?conversationId=${id}`, { scroll: false });
   };
 
