@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, Suspense, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { signOut as nextAuthSignOut } from "next-auth/react";
 import { logoutUser } from "@/lib/actions/auth";
 import { SessionUser } from "@/lib/session";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
@@ -476,24 +477,29 @@ export function Navbar({ user }: NavbarProps) {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const isSigningOutRef = useRef(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const dispatch = useAppDispatch();
   const [liveUser, setLiveUser] = useState<SessionUser | null | undefined>(user);
 
   // Synchronize when server updates the prop
   useEffect(() => {
-    setLiveUser(user);
+    if (!isSigningOutRef.current) {
+      setLiveUser(user);
+    }
   }, [user]);
 
   // Proactively verify and synchronize live authenticated session on mount and on every route transition.
   // Next.js App Router preserves RootLayout across client navigations; querying the live session
   // guarantees that the Navbar reflects the true active identity immediately, never displaying a stale previous user.
   useEffect(() => {
+    if (isSigningOutRef.current) return;
     let active = true;
     fetch("/api/auth/session", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((session) => {
-        if (!active) return;
+        if (!active || isSigningOutRef.current) return;
         if (session?.user?.id) {
           const fresh: SessionUser = {
             id: session.user.id,
@@ -580,8 +586,12 @@ export function Navbar({ user }: NavbarProps) {
   };
 
   const handleSignOut = async () => {
+    if (isSigningOutRef.current) return;
+    isSigningOutRef.current = true;
+    setIsSigningOut(true);
     closeMenu();
     disconnectSocket();
+    setLiveUser(null);
     dispatch(clearCredentials());
     if (typeof window !== "undefined") {
       try {
@@ -591,9 +601,21 @@ export function Navbar({ user }: NavbarProps) {
         // Safe cleanup
       }
     }
-    await logoutUser();
+
+    try {
+      await logoutUser();
+    } catch (err) {
+      console.warn("[WorkPulse SignOut] Notice from logoutUser action:", err);
+    }
+
+    try {
+      await nextAuthSignOut({ redirect: false });
+    } catch (err) {
+      console.warn("[WorkPulse SignOut] Notice from nextAuthSignOut:", err);
+    }
+
     if (typeof window !== "undefined") {
-      window.location.href = "/";
+      window.location.replace("/");
     }
   };
 
@@ -865,11 +887,12 @@ export function Navbar({ user }: NavbarProps) {
                   <div className="pt-1 shrink-0">
                     <button
                       type="button"
+                      disabled={isSigningOut}
                       onClick={handleSignOut}
-                      className="w-full text-left rounded-xl px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                      className="w-full text-left rounded-xl px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50 cursor-pointer"
                       role="menuitem"
                     >
-                      Sign Out
+                      {isSigningOut ? "Signing Out..." : "Sign Out"}
                     </button>
                   </div>
                 </div>
@@ -1027,10 +1050,11 @@ export function Navbar({ user }: NavbarProps) {
             {effectiveUser ? (
               <button
                 type="button"
+                disabled={isSigningOut}
                 onClick={handleSignOut}
-                className="w-full text-center py-2.5 text-sm font-semibold text-red-600 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:border-red-900/40 dark:hover:bg-red-950/50 transition-colors"
+                className="w-full text-center py-2.5 text-sm font-semibold text-red-600 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:border-red-900/40 dark:hover:bg-red-950/50 transition-colors disabled:opacity-50 cursor-pointer"
               >
-                Sign Out
+                {isSigningOut ? "Signing Out..." : "Sign Out"}
               </button>
             ) : (
               <>

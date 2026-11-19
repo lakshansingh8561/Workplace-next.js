@@ -4,7 +4,6 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { signOut } from "@/lib/auth";
 import { clearAllAuthCookies } from "@/lib/actions/auth";
 import { revalidatePath } from "next/cache";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";

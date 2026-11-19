@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { Role } from "@/types";
-import { signIn, signOut } from "@/lib/auth";
+import { signIn } from "@/lib/auth";
 import { getCurrentUser } from "@/lib/session";
 import { AuthError } from "next-auth";
 import { revalidatePath } from "next/cache";
@@ -31,7 +31,9 @@ export async function clearAllAuthCookies(): Promise<void> {
     const allCookies = cookieStore.getAll();
     const isProd = process.env.NODE_ENV === "production";
 
-    // 1. Delete all matching cookies from incoming request headers
+    const cookieNames = new Set<string>();
+
+    // 1. Gather all matching cookies from incoming request headers
     for (const cookie of allCookies) {
       const name = cookie.name;
       if (
@@ -41,19 +43,11 @@ export async function clearAllAuthCookies(): Promise<void> {
         name.includes("authjs") ||
         name.includes("next-auth")
       ) {
-        cookieStore.delete(name);
-        cookieStore.set(name, "", {
-          path: "/",
-          maxAge: 0,
-          expires: new Date(0),
-          secure: name.startsWith("__Secure-") || name.startsWith("__Host-") || isProd,
-          sameSite: "lax",
-          httpOnly: true,
-        });
+        cookieNames.add(name);
       }
     }
 
-    // 2. Explicitly invalidate all standard Auth.js & NextAuth cookie variants and chunks (0..4)
+    // 2. Add all known Auth.js & NextAuth cookie variants and chunks (0..5)
     const knownBaseNames = [
       "authjs.session-token",
       "__Secure-authjs.session-token",
@@ -66,22 +60,29 @@ export async function clearAllAuthCookies(): Promise<void> {
       "__Secure-next-auth.session-token",
       "next-auth.csrf-token",
       "__Host-next-auth.csrf-token",
+      "__Secure-next-auth.csrf-token",
       "next-auth.callback-url",
+      "__Secure-next-auth.callback-url",
     ];
 
     for (const base of knownBaseNames) {
-      const namesToClear = [base, `${base}.0`, `${base}.1`, `${base}.2`, `${base}.3`, `${base}.4`];
-      for (const name of namesToClear) {
-        cookieStore.delete(name);
-        cookieStore.set(name, "", {
-          path: "/",
-          maxAge: 0,
-          expires: new Date(0),
-          secure: name.startsWith("__Secure-") || name.startsWith("__Host-") || isProd,
-          sameSite: "lax",
-          httpOnly: true,
-        });
+      cookieNames.add(base);
+      for (let i = 0; i <= 5; i++) {
+        cookieNames.add(`${base}.${i}`);
       }
+    }
+
+    // 3. Clear each cookie cleanly with RFC-compliant attributes
+    for (const name of cookieNames) {
+      const isSecure = name.startsWith("__Secure-") || name.startsWith("__Host-") || isProd;
+      cookieStore.set(name, "", {
+        path: "/",
+        maxAge: 0,
+        expires: new Date(0),
+        secure: isSecure,
+        sameSite: "lax",
+        httpOnly: true,
+      });
     }
   } catch (err) {
     console.warn("[WorkPulse Auth] Notice clearing auth cookies:", err);
@@ -93,11 +94,6 @@ export async function clearAllAuthCookies(): Promise<void> {
  */
 export async function clearAllAuthCookiesAction(): Promise<{ success: boolean }> {
   await clearAllAuthCookies();
-  try {
-    await signOut({ redirect: false });
-  } catch {
-    // Non-blocking
-  }
   return { success: true };
 }
 
@@ -140,13 +136,6 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
 
   const { name, email, password, role } = result.data;
   const cleanEmail = email.toLowerCase().trim();
-
-  // Invalidate any existing server session so new registration begins with a pristine identity
-  try {
-    await signOut({ redirect: false });
-  } catch {
-    // Non-blocking
-  }
 
   // Rate limit registration requests by IP (5 attempts per 10 minutes)
   const clientIp = await getClientIp();
@@ -528,14 +517,29 @@ export async function loginWithGoogleAction(redirectTo?: string) {
 }
 
 /**
- * Server Action to sign out the active user session and invalidate layout caches.
+ * Server Action to sign out the active user session, invalidate database session version,
+ * purge all authentication cookies, and invalidate layout caches.
  */
-export async function logoutUser() {
-  await clearAllAuthCookies();
+export async function logoutUser(): Promise<{ success: boolean }> {
   try {
-    await signOut({ redirect: false });
-  } catch {
-    // Non-blocking fallback
+    const currentUser = await getCurrentUser();
+    if (currentUser?.id) {
+      await prisma.user.update({
+        where: { id: currentUser.id },
+        data: { sessionVersion: { increment: 1 } },
+      });
+      console.log(
+        `[WorkPulse Auth] Database sessionVersion incremented for user ${currentUser.id} on logout.`
+      );
+    }
+  } catch (dbErr) {
+    console.warn(
+      "[WorkPulse Auth Warning] Could not increment sessionVersion during logout:",
+      dbErr instanceof Error ? dbErr.message : "DB error"
+    );
   }
+
+  await clearAllAuthCookies();
   revalidatePath("/", "layout");
+  return { success: true };
 }
