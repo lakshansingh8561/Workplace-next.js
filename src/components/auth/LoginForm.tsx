@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { loginUser } from "@/lib/actions/auth";
@@ -26,6 +26,13 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const paramEmail = searchParams.get("email");
+    if (paramEmail && paramEmail.trim() !== email) {
+      setEmail(paramEmail.trim());
+    }
+  }, [searchParams, email]);
 
   const getUrlErrorMessage = () => {
     if (!urlError) return null;

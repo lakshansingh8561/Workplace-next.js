@@ -10,7 +10,7 @@ import {
   verifyEmailOtpAction,
   getUserVerificationStateAction,
 } from "@/lib/actions/auth-recovery";
-import { clearAllAuthCookiesAction } from "@/lib/actions/auth";
+import { clearAllAuthCookiesAction, logoutUser } from "@/lib/actions/auth";
 
 export function VerifyEmailView() {
   const router = useRouter();
@@ -129,8 +129,8 @@ export function VerifyEmailView() {
           const sessEmail = session.user.email.toLowerCase().trim();
           setActiveSessionEmail(sessEmail);
 
-          // If no email in URL, populate from verified session
-          if (!emailParam) {
+          // Only populate from active session if no URL param and no existing pending email exists
+          if (!emailParam && !email) {
             setEmail(sessEmail);
             if (typeof window !== "undefined") {
               try {
@@ -275,9 +275,13 @@ export function VerifyEmailView() {
   const handleSignOutConflictingSession = () => {
     startSignOutTransition(async () => {
       try {
-        await clearAllAuthCookiesAction();
+        await logoutUser();
+        await signOut({ redirect: false });
         setActiveSessionEmail(null);
         setErrorMessage(null);
+        if (typeof window !== "undefined") {
+          window.location.reload();
+        }
       } catch {
         // Fallback
       }
@@ -312,6 +316,16 @@ export function VerifyEmailView() {
         if (result.success) {
           if (result.role) {
             setUserRole(result.role);
+          }
+          // If a conflicting active session was present, purge it immediately upon successful verification
+          if (activeSessionEmail && activeSessionEmail !== targetEmail) {
+            try {
+              await logoutUser();
+              await signOut({ redirect: false });
+              setActiveSessionEmail(null);
+            } catch {
+              // Non-blocking
+            }
           }
           try {
             sessionStorage.removeItem("workpulse_verify_email");
@@ -450,15 +464,28 @@ export function VerifyEmailView() {
                 : "Your email address has been verified. You can now sign in to your WorkPulse account to explore freelance opportunities and submit proposals."}
             </p>
             <div className="pt-3">
-              <button
-                type="button"
-                onClick={handleNavigateAfterVerification}
-                className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
+              <Link
+                href={
+                  activeSessionEmail && activeSessionEmail === (emailParam || email).trim().toLowerCase()
+                    ? (userRole === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer")
+                    : `/login?verified=true${(emailParam || email).trim() ? `&email=${encodeURIComponent((emailParam || email).trim().toLowerCase())}` : ""}`
+                }
+                onClick={async () => {
+                  if (activeSessionEmail && activeSessionEmail !== (emailParam || email).trim().toLowerCase()) {
+                    try {
+                      await logoutUser();
+                      await signOut({ redirect: false });
+                    } catch {
+                      // Non-blocking
+                    }
+                  }
+                }}
+                className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer text-center"
               >
                 {activeSessionEmail && activeSessionEmail === (emailParam || email).trim().toLowerCase()
                   ? "Go to Workspace Dashboard →"
                   : "Sign In to Your Account →"}
-              </button>
+              </Link>
             </div>
           </div>
         )}
@@ -490,15 +517,28 @@ export function VerifyEmailView() {
                 : "Your email address is already verified. You can now sign in to your WorkPulse account to explore freelance opportunities and submit proposals."}
             </p>
             <div className="pt-3">
-              <button
-                type="button"
-                onClick={handleNavigateAfterVerification}
-                className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer"
+              <Link
+                href={
+                  activeSessionEmail && activeSessionEmail === (emailParam || email).trim().toLowerCase()
+                    ? (userRole === "CLIENT" ? "/dashboard/client" : "/dashboard/freelancer")
+                    : `/login?verified=true${(emailParam || email).trim() ? `&email=${encodeURIComponent((emailParam || email).trim().toLowerCase())}` : ""}`
+                }
+                onClick={async () => {
+                  if (activeSessionEmail && activeSessionEmail !== (emailParam || email).trim().toLowerCase()) {
+                    try {
+                      await logoutUser();
+                      await signOut({ redirect: false });
+                    } catch {
+                      // Non-blocking
+                    }
+                  }
+                }}
+                className="w-full inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-xs font-bold text-white shadow-sm hover:bg-emerald-500 transition-all cursor-pointer text-center"
               >
                 {activeSessionEmail && activeSessionEmail === (emailParam || email).trim().toLowerCase()
                   ? "Go to Workspace Dashboard →"
                   : "Sign In to Your Account →"}
-              </button>
+              </Link>
             </div>
           </div>
         )}

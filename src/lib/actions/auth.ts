@@ -47,29 +47,25 @@ export async function clearAllAuthCookies(): Promise<void> {
       }
     }
 
-    // 2. Add all known Auth.js & NextAuth cookie variants and chunks (0..5)
-    const knownBaseNames = [
+    // 2. Add canonical session and CSRF cookie names in case incoming headers missed them
+    const canonicalBaseNames = [
       "authjs.session-token",
+      "authjs.session-token.0",
       "__Secure-authjs.session-token",
+      "__Secure-authjs.session-token.0",
+      "next-auth.session-token",
+      "next-auth.session-token.0",
+      "__Secure-next-auth.session-token",
+      "__Secure-next-auth.session-token.0",
       "authjs.csrf-token",
       "__Host-authjs.csrf-token",
       "__Secure-authjs.csrf-token",
-      "authjs.callback-url",
-      "__Secure-authjs.callback-url",
-      "next-auth.session-token",
-      "__Secure-next-auth.session-token",
       "next-auth.csrf-token",
       "__Host-next-auth.csrf-token",
-      "__Secure-next-auth.csrf-token",
-      "next-auth.callback-url",
-      "__Secure-next-auth.callback-url",
     ];
 
-    for (const base of knownBaseNames) {
-      cookieNames.add(base);
-      for (let i = 0; i <= 5; i++) {
-        cookieNames.add(`${base}.${i}`);
-      }
+    for (const name of canonicalBaseNames) {
+      cookieNames.add(name);
     }
 
     // 3. Clear each cookie cleanly with RFC-compliant attributes
