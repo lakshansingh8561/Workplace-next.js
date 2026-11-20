@@ -455,12 +455,6 @@ export async function loginUser(input: unknown): Promise<AuthActionResult> {
     // Purge any stale session cookies completely before establishing new authenticated session
     await clearAllAuthCookies();
 
-    try {
-      await signOut({ redirect: false });
-    } catch {
-      // Non-blocking
-    }
-
     await signIn("credentials", {
       email: cleanEmail,
       password,
