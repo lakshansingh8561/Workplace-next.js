@@ -601,7 +601,7 @@ export function VerifyEmailView() {
                     "We created your account, but the verification email could not be delivered automatically by the configured email provider."}
                 </p>
                 <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-400">
-                  Please verify your email credentials on Render, or click <strong>Resend Code</strong> below.
+                  Please verify your email credentials on Vercel or Render, or click <strong>Resend Code</strong> below.
                 </p>
               </div>
             )}

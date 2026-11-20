@@ -293,18 +293,21 @@ export function setupSocketHandlers(io: WorkPulseSocketServer) {
         // Broadcast to all participants in the conversation room
         io.to(roomName).emit("message:new", canonicalMessage);
 
-        // Also broadcast update to counterparty user room so their inbox preview updates
+        // Also broadcast directly to counterparty's personal room (ensures real-time arrival even if room join lagged)
         const counterpartyId =
           conversation.clientId === userId
             ? conversation.freelancerId
             : conversation.clientId;
 
-        io.to(`user:${counterpartyId}`).emit("conversation:updated", {
-          conversationId,
-          lastMessageSnippet: canonicalMessage.content.slice(0, 80),
-          lastMessageAt: canonicalMessage.createdAt,
-          senderId: userId,
-        });
+        if (counterpartyId) {
+          io.to(`user:${counterpartyId}`).emit("message:new", canonicalMessage);
+          io.to(`user:${counterpartyId}`).emit("conversation:updated", {
+            conversationId,
+            lastMessageSnippet: canonicalMessage.content.slice(0, 80),
+            lastMessageAt: canonicalMessage.createdAt,
+            senderId: userId,
+          });
+        }
 
         // Acknowledge the sender
         callback?.({

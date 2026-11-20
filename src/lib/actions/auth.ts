@@ -205,7 +205,7 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
         },
       });
 
-      // Strict 4.5s timeout on email delivery so registration never hangs or blocks the UI
+      // Direct call to sendEmailVerificationOtp with 9-second timeout for cloud SMTP handshakes
       const emailResult = await Promise.race([
         sendEmailVerificationOtp({
           to: newUser.email,
@@ -217,9 +217,10 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
             () =>
               resolve({
                 success: false,
-                error: "Verification email is queued. If not received within a minute, click Resend Code.",
+                error:
+                  "Email delivery timed out. Please check your email credentials on Vercel or click Resend Code.",
               }),
-            4500
+            9000
           )
         ),
       ]);
@@ -236,11 +237,19 @@ export async function registerUser(input: unknown): Promise<AuthActionResult> {
           email: newUser.email,
           warning:
             emailResult.error ||
-            "Account created! Your verification code is being delivered. You can click Resend Code if it does not arrive shortly.",
+            "Unable to deliver verification code automatically. Please click Resend Code to try again.",
           message:
             "Account created. If the code does not arrive in your inbox, click Resend Code.",
         };
       }
+
+      return {
+        success: true,
+        emailDelivered: true,
+        role: newUser.role as Role,
+        email: newUser.email,
+        message: "Account created successfully! Verification code sent to your email.",
+      };
     } catch (emailErr) {
       console.error(
         "[WorkPulse Verification Email Error]:",

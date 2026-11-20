@@ -203,6 +203,35 @@ export function MessagingLayout({
     };
   }, [currentUserId, dispatch, refreshConversations]);
 
+  // Fallback sync for conversation list when WebSocket presence/updates are offline
+  useEffect(() => {
+    let isCancelled = false;
+
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") {
+        refreshConversations();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    const interval = setInterval(async () => {
+      if (isCancelled || document.hidden) return;
+      const socket = await getSocket();
+      if (!socket || !socket.connected) {
+        refreshConversations();
+      }
+    }, 6000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [refreshConversations]);
+
   // Sync selectedId with query param changes (e.g. browser back/forward buttons)
   useEffect(() => {
     if (queryConvId) {

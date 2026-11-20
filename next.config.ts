@@ -54,7 +54,7 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' https: data:",
-              "connect-src 'self' https:",
+              "connect-src 'self' https: wss: ws:",
               "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com",
               "frame-ancestors 'none'",
               "base-uri 'self'",

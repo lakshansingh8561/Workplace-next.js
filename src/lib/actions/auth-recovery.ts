@@ -630,9 +630,9 @@ export async function sendEmailVerificationOtpAction(
           () =>
             resolve({
               success: false,
-              error: "Email delivery timed out. Please verify your email provider configuration on Render.",
+              error: "Email delivery timed out. Please verify your email provider configuration on Vercel/Render.",
             }),
-          6000
+          9000
         )
       ),
     ]);

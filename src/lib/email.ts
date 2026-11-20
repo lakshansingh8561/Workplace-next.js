@@ -228,7 +228,7 @@ export async function sendEmail({
     }
   }
 
-  // 2. Production provider integration: SMTP (Nodemailer)
+  // 2. Production provider integration: SMTP (Nodemailer / Gmail)
   if (emailUser && emailPass && smtpHost) {
     try {
       const cleanPass = emailPass.replace(/\s+/g, "");
@@ -240,22 +240,35 @@ export async function sendEmail({
       const targetPort = smtpPort || 587;
       const isSecure = targetPort === 465;
 
-      const transporter = nodemailer.createTransport({
-        host: targetHost,
-        port: targetPort,
-        secure: isSecure,
-        requireTLS: !isSecure,
-        connectionTimeout: 5000, // 5s TCP connection timeout (never hangs indefinitely)
-        greetingTimeout: 5000,   // 5s SMTP greeting timeout
-        socketTimeout: 6000,     // 6s socket timeout
-        auth: {
-          user: emailUser.trim(),
-          pass: cleanPass,
-        },
-        tls: {
-          rejectUnauthorized: process.env.NODE_ENV === "production",
-        },
-      });
+      // When targeting Gmail, using nodemailer's built-in "gmail" service definition
+      // provides optimal connection pooling and avoids firewall port drops
+      const transporter = isGmail
+        ? nodemailer.createTransport({
+            service: "gmail",
+            auth: {
+              user: emailUser.trim(),
+              pass: cleanPass,
+            },
+            connectionTimeout: 8000,
+            greetingTimeout: 8000,
+            socketTimeout: 10000,
+          })
+        : nodemailer.createTransport({
+            host: targetHost,
+            port: targetPort,
+            secure: isSecure,
+            requireTLS: !isSecure,
+            connectionTimeout: 8000,
+            greetingTimeout: 8000,
+            socketTimeout: 10000,
+            auth: {
+              user: emailUser.trim(),
+              pass: cleanPass,
+            },
+            tls: {
+              rejectUnauthorized: process.env.NODE_ENV === "production",
+            },
+          });
 
       const info = await transporter.sendMail({
         from: fromAddress,
@@ -289,7 +302,7 @@ export async function sendEmail({
         errMsg.includes("Greeting never received")
       ) {
         userFriendlyError =
-          "Connection to SMTP server timed out. Render cloud may restrict port 465; please configure SMTP_PORT=587 or use Resend (RESEND_API_KEY).";
+          "Connection to SMTP server timed out. Cloud hosting may restrict direct SMTP ports; please configure EMAIL_USER and EMAIL_PASS on Vercel or use Resend (RESEND_API_KEY).";
       } else if (errMsg.includes("ECONNREFUSED")) {
         userFriendlyError =
           "Connection refused by SMTP server. Please verify SMTP_HOST and SMTP_PORT.";
@@ -305,12 +318,12 @@ export async function sendEmail({
   // 3. Production fail-safe: Never pretend emails were sent if unconfigured in production
   if (process.env.NODE_ENV === "production") {
     console.error(
-      "[WorkPulse Email Error] No email provider configured in production environment (Neither RESEND_API_KEY nor SMTP credentials EMAIL_USER/EMAIL_PASS are configured on Render)."
+      "[WorkPulse Email Error] No email provider configured in production environment (Neither RESEND_API_KEY nor SMTP credentials EMAIL_USER/EMAIL_PASS are configured on Vercel or Render)."
     );
     return {
       success: false,
       error:
-        "Email delivery service is unconfigured in production. Please configure RESEND_API_KEY or SMTP credentials (EMAIL_USER, EMAIL_PASS) in Render environment variables.",
+        "Email delivery service is unconfigured in production. Please configure EMAIL_USER and EMAIL_PASS (or RESEND_API_KEY) in Vercel / Render environment variables.",
     };
   }
 

@@ -317,26 +317,20 @@ export function ChatRoom({
         wasDisconnectedRef.current = true;
       };
 
-      // Handle reconnect: re-join room and safely debounce reconciliation for genuine reconnects
+      // Handle connect/reconnect: re-join room and safely debounce reconciliation
+      // Guarantees that any messages sent while connecting or reconnecting arrive immediately without refresh
       const handleConnect = () => {
         socket.emit("conversation:join", { conversationId });
 
-        // If this is a genuine reconnection after being disconnected:
-        // Debounce by 350ms so rapid socket flapping collapses into a single atomic reconciliation pass,
-        // without arbitrary 12-second lockouts.
-        if (wasDisconnectedRef.current) {
-          wasDisconnectedRef.current = false;
-
-          if (reconcileDebounceTimerRef.current) {
-            clearTimeout(reconcileDebounceTimerRef.current);
-          }
-
-          reconcileDebounceTimerRef.current = setTimeout(() => {
-            if (!isCancelled) {
-              runReconcile();
-            }
-          }, 350);
+        if (reconcileDebounceTimerRef.current) {
+          clearTimeout(reconcileDebounceTimerRef.current);
         }
+
+        reconcileDebounceTimerRef.current = setTimeout(() => {
+          if (!isCancelled) {
+            runReconcile();
+          }
+        }, 350);
       };
 
       socket.on("message:new", handleNewMessage);
@@ -384,6 +378,53 @@ export function ChatRoom({
       );
     };
   }, [conversationId, currentUserId, dispatch, runReconcile, scrollToBottom]);
+
+  // Resilient Zero-Refresh Synchronization Loop:
+  // When WebSocket is disconnected, connecting, or Render server is spinning up,
+  // safely checks for new messages every 2.5 seconds and on window focus/visibility change.
+  // The moment the socket is connected, WebSocket handles deliveries in real time (<100ms).
+  // This guarantees that the receiver NEVER has to refresh the browser to see new messages.
+  useEffect(() => {
+    let isCancelled = false;
+
+    // Wake up Render socket server in background if sleeping
+    try {
+      fetch("https://workplace-next-js.onrender.com/health", {
+        mode: "no-cors",
+        cache: "no-store",
+      }).catch(() => {});
+    } catch {
+      // Non-blocking
+    }
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "visible" && !isFetchingHistoryRef.current) {
+        runReconcile();
+      }
+    };
+
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    const fallbackSyncInterval = setInterval(async () => {
+      if (isCancelled || document.hidden) return;
+
+      const socket = await getSocket();
+      const isSocketConnected = Boolean(socket && socket.connected);
+
+      // If socket is offline or reconnecting, run reconcile to seamlessly fetch any new messages without refresh
+      if (!isSocketConnected && !isFetchingHistoryRef.current) {
+        runReconcile();
+      }
+    }, 2500);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(fallbackSyncInterval);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
+  }, [runReconcile]);
 
   // Load older messages (cursor pagination preserved)
   const handleLoadOlderMessages = async () => {

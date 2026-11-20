@@ -22,20 +22,39 @@ let pendingConnectPromise: Promise<WorkPulseClientSocket | null> | null = null;
  * 3. In local browser development, uses port 3001.
  */
 export function getSocketServerUrl(): string {
+  // 1. Explicit public socket URL takes highest priority
   if (process.env.NEXT_PUBLIC_SOCKET_URL) {
     return process.env.NEXT_PUBLIC_SOCKET_URL.replace(/\/$/, "");
   }
-  if (typeof window !== "undefined") {
-    // Vercel serverless platform cannot run background WebSockets on port 3001.
-    // Connect directly to the dedicated Render socket service.
-    if (window.location.hostname.includes("vercel.app")) {
-      return "https://workplace-next-js.onrender.com";
-    }
-    const protocol = window.location.protocol;
-    const hostname = window.location.hostname;
-    return `${protocol}//${hostname}:3001`;
+
+  // 2. Server-side environment variable (for Server Actions on Vercel)
+  if (process.env.SOCKET_SERVER_URL) {
+    return process.env.SOCKET_SERVER_URL.replace(/\/$/, "");
   }
-  return process.env.SOCKET_SERVER_URL || "http://localhost:3001";
+
+  // 3. Client-side browser resolution
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    // Local development: standalone socket runs on port 3001
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      const protocol = window.location.protocol;
+      return `${protocol}//${hostname}:3001`;
+    }
+    // If running on Render directly, Socket.IO is on standard port 443 of the same host
+    if (hostname.includes("onrender.com")) {
+      return `${window.location.protocol}//${hostname}`;
+    }
+    // On Vercel or any other domain, connect to the persistent Render WebSocket service
+    return "https://workplace-next-js.onrender.com";
+  }
+
+  // 4. Server-side fallback (Vercel serverless functions dispatching internal broadcasts)
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    return "https://workplace-next-js.onrender.com";
+  }
+
+  // Local server fallback
+  return "http://localhost:3001";
 }
 
 /**

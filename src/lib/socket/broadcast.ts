@@ -23,14 +23,17 @@ export async function broadcastMessageToSocketServer(
   try {
     const baseUrl =
       process.env.INTERNAL_SOCKET_URL ||
+      process.env.SOCKET_SERVER_URL ||
       process.env.NEXT_PUBLIC_SOCKET_URL ||
-      getSocketServerUrl();
+      (process.env.VERCEL || process.env.NODE_ENV === "production"
+        ? "https://workplace-next-js.onrender.com"
+        : getSocketServerUrl());
 
     const cleanBaseUrl = baseUrl.replace(/\/$/, "");
     const endpoint = `${cleanBaseUrl}/api/socket/broadcast`;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
+    const timer = setTimeout(() => controller.abort(), 5000);
 
     const res = await fetch(endpoint, {
       method: "POST",

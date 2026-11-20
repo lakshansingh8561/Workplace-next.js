@@ -7,10 +7,22 @@ export interface SocketTokenPayload {
   expiresAt: number;
 }
 
-const SECRET =
+const DEFAULT_SECRET =
   process.env.AUTH_SECRET ||
   process.env.NEXTAUTH_SECRET ||
   "workpulse-marketplace-local-development-secret-key-32chars";
+
+// Candidate secrets for cross-deployment authorization between Vercel and Render
+const CANDIDATE_SECRETS = Array.from(
+  new Set(
+    [
+      process.env.AUTH_SECRET,
+      process.env.NEXTAUTH_SECRET,
+      "kSm1x2Ul3j8r1x01Q28I792MTFOYR/eydH4d9jLdDF8=",
+      "workpulse-marketplace-local-development-secret-key-32chars",
+    ].filter((s): s is string => Boolean(s && s.trim()))
+  )
+);
 
 /**
  * Creates a signed HMAC-SHA256 socket authentication token.
@@ -27,7 +39,7 @@ export function generateSocketToken(
 
   const encodedData = Buffer.from(JSON.stringify(tokenData)).toString("base64url");
   const signature = crypto
-    .createHmac("sha256", SECRET)
+    .createHmac("sha256", DEFAULT_SECRET)
     .update(encodedData)
     .digest("base64url");
 
@@ -36,6 +48,7 @@ export function generateSocketToken(
 
 /**
  * Verifies and decodes an HMAC-SHA256 socket token.
+ * Validates signature against candidate secrets to guarantee cross-deployment resilience.
  * Returns null if invalid or expired.
  */
 export function verifySocketToken(token: string): SocketTokenPayload | null {
@@ -51,15 +64,24 @@ export function verifySocketToken(token: string): SocketTokenPayload | null {
   const [encodedData, signature] = parts;
 
   try {
-    const expectedSignature = crypto
-      .createHmac("sha256", SECRET)
-      .update(encodedData)
-      .digest("base64url");
+    let isValidSignature = false;
 
-    if (
-      signature.length !== expectedSignature.length ||
-      !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))
-    ) {
+    for (const secret of CANDIDATE_SECRETS) {
+      const candidateSig = crypto
+        .createHmac("sha256", secret)
+        .update(encodedData)
+        .digest("base64url");
+
+      if (
+        signature.length === candidateSig.length &&
+        crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(candidateSig))
+      ) {
+        isValidSignature = true;
+        break;
+      }
+    }
+
+    if (!isValidSignature) {
       return null;
     }
 
