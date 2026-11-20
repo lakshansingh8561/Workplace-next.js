@@ -15,7 +15,7 @@ import {
   clearDraftMessage,
   setUserTyping,
 } from "@/lib/store/slices/messagingSlice";
-import { getSocket } from "@/lib/socket/client";
+import { getSocket, WorkPulseClientSocket } from "@/lib/socket/client";
 
 interface ChatRoomProps {
   conversationId: string;
@@ -76,6 +76,18 @@ export function ChatRoom({
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
+  // Guards against duplicate/rapid in-flight requests and reconnect loops
+  const hasLoadedInitialRef = useRef(false);
+  const isFetchingHistoryRef = useRef(false);
+  const reconciliationPendingRef = useRef(false);
+  const reconcileDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const wasDisconnectedRef = useRef(false);
+  const onMessageSentRef = useRef(onMessageSent);
+
+  useEffect(() => {
+    onMessageSentRef.current = onMessageSent;
+  });
+
   // Sync active conversation with Redux store
   useEffect(() => {
     dispatch(setActiveConversationId(conversationId));
@@ -93,17 +105,70 @@ export function ChatRoom({
     }
   }, []);
 
-  // Initial load of messages when conversationId changes
+  // Reconciles latest messages missing during offline/disconnect periods.
+  // Coalesces multiple reconnect triggers and avoids concurrent duplicate requests.
+  const runReconcile = useCallback(async () => {
+    if (isFetchingHistoryRef.current) {
+      // Coalesce request: marks that a reconciliation pass must run immediately after the active fetch completes
+      reconciliationPendingRef.current = true;
+      return;
+    }
+
+    isFetchingHistoryRef.current = true;
+    try {
+      const res = await getMessagesAction(conversationId, 25);
+      if (res.success && res.messages) {
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          const newArrivals = res.messages!.filter((m) => !existingIds.has(m.id));
+          if (newArrivals.length === 0) return prev;
+          return [...prev, ...newArrivals];
+        });
+        setTimeout(() => scrollToBottom("smooth"), 50);
+
+        // Emit read receipt if new messages arrived from counterparty
+        const hasCounterpartyMessage = res.messages.some((m) => m.senderId !== currentUserId);
+        if (hasCounterpartyMessage) {
+          getSocket().then((s) => s?.emit("message:read", { conversationId }));
+        }
+
+        if (onMessageSentRef.current) {
+          try {
+            onMessageSentRef.current();
+          } catch {
+            // Non-blocking
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[WorkPulse Socket Reconnect Reconciliation Warning]:", err);
+    } finally {
+      isFetchingHistoryRef.current = false;
+      // If another reconciliation was requested while this query was running, drain the queue
+      if (reconciliationPendingRef.current) {
+        reconciliationPendingRef.current = false;
+        setTimeout(runReconcile, 50);
+      }
+    }
+  }, [conversationId, currentUserId, scrollToBottom]);
+
+  // Initial load of messages when conversationId changes (strictly deduplicated)
   useEffect(() => {
     let ignore = false;
+    hasLoadedInitialRef.current = false;
 
     async function fetchHistory() {
+      // Drop duplicate or overlapping calls for the same conversation
+      if (isFetchingHistoryRef.current) return;
+      isFetchingHistoryRef.current = true;
+
       setIsLoading(true);
       setErrorMessage(null);
       setActionSuccess(null);
       // Clean slate on conversation transition: immediately clear previous conversation state
       setMessages([]);
       setConversation(null);
+
       try {
         const res = await getMessagesAction(conversationId, 50);
         if (!ignore) {
@@ -114,6 +179,7 @@ export function ChatRoom({
             if (res.conversation) {
               setConversation(res.conversation);
             }
+            hasLoadedInitialRef.current = true;
             setTimeout(() => scrollToBottom("auto"), 60);
           } else {
             setErrorMessage(res.error || "Unable to load conversation messages.");
@@ -125,8 +191,14 @@ export function ChatRoom({
         }
         console.error("[WorkPulse Messaging] History fetch error:", err);
       } finally {
+        isFetchingHistoryRef.current = false;
         if (!ignore) {
           setIsLoading(false);
+        }
+        // If a reconciliation was queued while the initial load was running, drain it now
+        if (reconciliationPendingRef.current) {
+          reconciliationPendingRef.current = false;
+          runReconcile();
         }
       }
     }
@@ -135,16 +207,22 @@ export function ChatRoom({
 
     return () => {
       ignore = true;
+      isFetchingHistoryRef.current = false;
+      if (reconcileDebounceTimerRef.current) {
+        clearTimeout(reconcileDebounceTimerRef.current);
+      }
     };
-  }, [conversationId, scrollToBottom]);
+  }, [conversationId, runReconcile, scrollToBottom]);
 
   // Socket.IO Real-Time Subscription (WhatsApp-like immediate delivery, typing & read receipts)
   useEffect(() => {
     let isCancelled = false;
+    let boundSocket: WorkPulseClientSocket | null = null;
 
     async function setupSocketSubscription() {
       const socket = await getSocket();
-      if (!socket || isCancelled) return;
+      if (!socket || isCancelled) return null;
+      boundSocket = socket;
 
       // Join conversation room
       socket.emit("conversation:join", { conversationId }, (res) => {
@@ -156,7 +234,7 @@ export function ChatRoom({
       // Mark conversation as read on initial open
       socket.emit("message:read", { conversationId });
 
-      // Handle incoming messages
+      // Handle incoming messages directly via WebSockets (never refetches conversation history)
       const handleNewMessage = (msg: ChatMessageDto) => {
         if (msg.conversationId !== conversationId) return;
 
@@ -193,9 +271,9 @@ export function ChatRoom({
         }
 
         // Notify parent layout to refresh conversation snippet
-        if (onMessageSent) {
+        if (onMessageSentRef.current) {
           try {
-            onMessageSent();
+            onMessageSentRef.current();
           } catch {
             // Non-blocking
           }
@@ -234,47 +312,68 @@ export function ChatRoom({
         }
       };
 
-      // Handle reconnect: rejoin room and reconcile latest messages
-      const handleReconnect = async () => {
+      // Track disconnection state to distinguish genuine reconnection from initial connection
+      const handleDisconnect = () => {
+        wasDisconnectedRef.current = true;
+      };
+
+      // Handle reconnect: re-join room and safely debounce reconciliation for genuine reconnects
+      const handleConnect = () => {
         socket.emit("conversation:join", { conversationId });
-        try {
-          const res = await getMessagesAction(conversationId, 15);
-          if (res.success && res.messages) {
-            setMessages((prev) => {
-              const existingIds = new Set(prev.map((m) => m.id));
-              const newArrivals = res.messages!.filter((m) => !existingIds.has(m.id));
-              if (newArrivals.length === 0) return prev;
-              return [...prev, ...newArrivals];
-            });
+
+        // If this is a genuine reconnection after being disconnected:
+        // Debounce by 350ms so rapid socket flapping collapses into a single atomic reconciliation pass,
+        // without arbitrary 12-second lockouts.
+        if (wasDisconnectedRef.current) {
+          wasDisconnectedRef.current = false;
+
+          if (reconcileDebounceTimerRef.current) {
+            clearTimeout(reconcileDebounceTimerRef.current);
           }
-        } catch (err) {
-          console.warn("[WorkPulse Socket Reconnect Reconciliation Warning]:", err);
+
+          reconcileDebounceTimerRef.current = setTimeout(() => {
+            if (!isCancelled) {
+              runReconcile();
+            }
+          }, 350);
         }
       };
 
       socket.on("message:new", handleNewMessage);
       socket.on("typing:update", handleTypingUpdate);
       socket.on("message:read_receipt", handleReadReceipt);
-      socket.on("connect", handleReconnect);
+      socket.on("disconnect", handleDisconnect);
+      socket.on("connect", handleConnect);
 
       return () => {
         socket.off("message:new", handleNewMessage);
         socket.off("typing:update", handleTypingUpdate);
         socket.off("message:read_receipt", handleReadReceipt);
-        socket.off("connect", handleReconnect);
+        socket.off("disconnect", handleDisconnect);
+        socket.off("connect", handleConnect);
         socket.emit("conversation:leave", { conversationId });
       };
     }
 
-    let cleanupPromise = setupSocketSubscription();
+    let cleanupFn: (() => void) | null = null;
+    setupSocketSubscription().then((fn) => {
+      if (isCancelled && fn) {
+        fn();
+      } else {
+        cleanupFn = fn || null;
+      }
+    });
 
     return () => {
       isCancelled = true;
-      cleanupPromise.then((cleanup) => {
-        if (typeof cleanup === "function") {
-          cleanup();
-        }
-      });
+      if (reconcileDebounceTimerRef.current) {
+        clearTimeout(reconcileDebounceTimerRef.current);
+      }
+      if (cleanupFn) {
+        cleanupFn();
+      } else if (boundSocket) {
+        boundSocket.emit("conversation:leave", { conversationId });
+      }
       // Clear typing indicator for current conversation on unmount
       dispatch(
         setUserTyping({
@@ -284,7 +383,7 @@ export function ChatRoom({
         })
       );
     };
-  }, [conversationId, currentUserId, dispatch, onMessageSent, scrollToBottom]);
+  }, [conversationId, currentUserId, dispatch, runReconcile, scrollToBottom]);
 
   // Load older messages (cursor pagination preserved)
   const handleLoadOlderMessages = async () => {

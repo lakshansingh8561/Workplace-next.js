@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ConversationList } from "@/components/messages/ConversationList";
@@ -50,7 +50,22 @@ export function MessagingLayout({
   const queryConvId = searchParams.get("conversationId");
   const queryContractId = searchParams.get("contractId");
 
+  const isRefreshingRef = useRef(false);
+  const lastRefreshTimeRef = useRef(0);
+  const activeConvIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    activeConvIdRef.current = selectedId || queryConvId;
+  }, [selectedId, queryConvId]);
+
+  // Throttled conversation list refresher (max 1 execution per 4 seconds)
   const refreshConversations = useCallback(async () => {
+    if (isRefreshingRef.current) return null;
+    const now = Date.now();
+    if (now - lastRefreshTimeRef.current < 4000) return null;
+
+    isRefreshingRef.current = true;
+    lastRefreshTimeRef.current = now;
     try {
       const res = await getConversationsAction();
       if (res.success && res.conversations) {
@@ -59,6 +74,8 @@ export function MessagingLayout({
       }
     } catch (err) {
       console.error("Failed to refresh conversation list:", err);
+    } finally {
+      isRefreshingRef.current = false;
     }
     return null;
   }, []);
@@ -105,7 +122,7 @@ export function MessagingLayout({
     };
   }, [queryContractId, conversations, refreshConversations]);
 
-  // Socket.IO presence & conversation update listeners
+  // Socket.IO presence & conversation update listeners (stable lifecycle)
   useEffect(() => {
     let isCancelled = false;
 
@@ -139,7 +156,7 @@ export function MessagingLayout({
           }
 
           const existing = prev[targetIndex];
-          const isCurrentlyActive = existing.id === (selectedId || queryConvId);
+          const isCurrentlyActive = existing.id === activeConvIdRef.current;
           const updatedItem = {
             ...existing,
             lastMessageSnippet: payload.lastMessageSnippet,
@@ -184,7 +201,7 @@ export function MessagingLayout({
         }
       });
     };
-  }, [currentUserId, dispatch, queryConvId, refreshConversations, selectedId]);
+  }, [currentUserId, dispatch, refreshConversations]);
 
   // Sync selectedId with query param changes (e.g. browser back/forward buttons)
   useEffect(() => {
