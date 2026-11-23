@@ -284,7 +284,7 @@ export const FreelancerProfileSchema = z.object({
 export type FreelancerProfileInput = z.infer<typeof FreelancerProfileSchema>;
 
 export const ClientProfileSchema = z.object({
-  name: z
+  name: z   
     .string()
     .trim()
     .min(2, "Full name must be at least 2 characters")
@@ -388,7 +388,7 @@ export function calculateFreelancerProfileCompletion(profile: {
   } else {
     missing.push("Languages");
   }
-
+                   
   const hasPortfolio =
     (profile.portfolioProjects && profile.portfolioProjects.length > 0) ||
     (profile.portfolioUrls && profile.portfolioUrls.length > 0);

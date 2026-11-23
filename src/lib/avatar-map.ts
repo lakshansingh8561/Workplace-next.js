@@ -26,28 +26,28 @@ export const FREELANCER_DEMO_IMAGES: readonly string[] = [
   "/images/freelancers/freelancer2.jfif",
   "/images/freelancers/freelancer3.jfif", 
   "/images/freelancers/freelancer4.jfif",
-  "/images/freelancers/freelancer5.jfif",
+  "/images/freelancers/freelancer5.jfif",  
 ] as const;
 
 /**
- * Computes a stable 32-bit integer hash from a string key.
+ * Computes a stable 32-bit integer hash from a string key. 
  */
-function stableHash(str: string): number {
+function stableHash(str: string): number {  
   let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
+  for (let i = 0; i < str.length; i++) {   
+    hash = (hash << 5) - hash + str.charCodeAt(i);  
     hash |= 0; // Convert to 32bit integer
-  }
+  } 
   return Math.abs(hash);
 }
 
-export interface AvatarResolvableUser {
-  id?: string | null;
-  image?: string | null;
-  role?: string | null;
-  name?: string | null;
-  companyName?: string | null;
-}
+export interface AvatarResolvableUser { 
+  id?: string | null; 
+  image?: string | null; 
+  role?: string | null;  
+  name?: string | null; 
+  companyName?: string | null; 
+} 
 
 /**
  * Returns the deterministic avatar image URL for a user or profile.
