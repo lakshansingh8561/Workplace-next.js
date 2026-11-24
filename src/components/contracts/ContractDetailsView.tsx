@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect, useRef, useCallback, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -8,7 +8,9 @@ import {
   submitMilestoneAction,
   approveMilestoneAction,
   updateContractStatusAction,
+  getContractDetailsAction,
 } from "@/lib/actions/contract";
+import { getSocket } from "@/lib/socket/client";
 import {
   broadcastMilestoneUpdate,
   broadcastMarketplaceEvent,
@@ -129,25 +131,118 @@ export function ContractDetailsView({
   const [paymentRefreshTrigger, setPaymentRefreshTrigger] = useState(0);
   const [isPending, startTransition] = useTransition();
 
+  const isSyncingRef = useRef(false);
+
+  // Safely synchronizes fresh contract details from the server without requiring full page refresh
+  const syncContractDetails = useCallback(async (source?: string) => {
+    if (isSyncingRef.current) return;
+    isSyncingRef.current = true;
+    try {
+      const res = await getContractDetailsAction(contract.id);
+      if (res.success && res.contract) {
+        setContract(res.contract);
+      }
+    } catch (err) {
+      console.warn(`[WorkPulse Contract Sync] Error during sync (${source || "manual"}):`, err);
+    } finally {
+      isSyncingRef.current = false;
+    }
+  }, [contract.id]);
+
   // Sync state whenever server revalidates or sends fresh contract props
   useEffect(() => {
     setContract(initialContract);
   }, [initialContract]);
 
-  // Subscribe to real-time milestone and contract status events across tabs
+  // 1. Real-Time Socket.IO Listener: instantly react to remote milestone submissions / contract updates
+  useEffect(() => {
+    let isMounted = true;
+    let cleanupSocket: (() => void) | null = null;
+
+    async function initSocketSubscription() {
+      try {
+        const socket = await getSocket();
+        if (!socket || !isMounted) return;
+
+        // Join the dedicated contract room
+        socket.emit("contract:join", { contractId: contract.id });
+
+        const handleContractUpdated = (payload: {
+          contractId: string;
+          milestoneId?: string;
+          status?: string;
+        }) => {
+          if (payload.contractId === contract.id) {
+            syncContractDetails("socket");
+          }
+        };
+
+        const handleReconnect = () => {
+          socket.emit("contract:join", { contractId: contract.id });
+          syncContractDetails("reconnect");
+        };
+
+        socket.on("contract:updated", handleContractUpdated);
+        socket.on("connect", handleReconnect);
+
+        cleanupSocket = () => {
+          socket.off("contract:updated", handleContractUpdated);
+          socket.off("connect", handleReconnect);
+          socket.emit("contract:leave", { contractId: contract.id });
+        };
+      } catch (err) {
+        console.warn("[WorkPulse Socket Contract Error]:", err);
+      }
+    }
+
+    initSocketSubscription();
+
+    return () => {
+      isMounted = false;
+      if (cleanupSocket) cleanupSocket();
+    };
+  }, [contract.id, syncContractDetails]);
+
+  // 2. Tab Focus & Background Polling Fallback (ensures zero-refresh sync across devices & sleep states)
+  useEffect(() => {
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        syncContractDetails("visibility");
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+
+    // 4-second active polling interval while user has the contract tab visible
+    const intervalId = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        syncContractDetails("interval");
+      }
+    }, 4000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      clearInterval(intervalId);
+    };
+  }, [syncContractDetails]);
+
+  // 3. Local cross-tab broadcast synchronization
   useEffect(() => {
     const unsubscribe = subscribeToMarketplaceEvents((event) => {
       if (
         (event.type === "MILESTONE_STATUS" && event.contractId === contract.id) ||
         (event.type === "CONTRACT_STATUS" && event.contractId === contract.id)
       ) {
+        syncContractDetails("cross-tab");
         startTransition(() => {
           router.refresh();
         });
       }
     });
     return unsubscribe;
-  }, [contract.id, router]);
+  }, [contract.id, router, syncContractDetails]);
 
   const isClient = currentUserRole === "CLIENT" && contract.clientId === currentUserId;
   const isFreelancer =
@@ -860,6 +955,7 @@ export function ContractDetailsView({
           contractTitle={contract.title}
           onSuccess={() => {
             broadcastMilestoneUpdate(submittingMilestone.id, contract.id, "SUBMITTED");
+            syncContractDetails("modal-submit");
             router.refresh();
           }}
         />
@@ -874,6 +970,7 @@ export function ContractDetailsView({
           milestoneTitle={requestingChangesMilestone.title}
           onSuccess={() => {
             broadcastMilestoneUpdate(requestingChangesMilestone.id, contract.id, "ACTIVE");
+            syncContractDetails("modal-revision");
             router.refresh();
           }}
         />

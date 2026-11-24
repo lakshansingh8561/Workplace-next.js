@@ -213,16 +213,29 @@ export async function sendInterviewInvitationAction(
         throw new Error("An interview invitation has already been sent to this freelancer for this job.");
       }
 
-      // Check or create pre-hire conversation
-      let conversation = await tx.conversation.findUnique({
-        where: {
-          jobId_freelancerId: {
-            jobId,
+      // Check or create pre-hire conversation (prefer existing conversation for this client-freelancer pair)
+      let conversation = null;
+      if (tx.conversation.findFirst) {
+        conversation = await tx.conversation.findFirst({
+          where: {
+            clientId: user.id,
             freelancerId,
           },
-        },
-        select: { id: true },
-      });
+          orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+          select: { id: true },
+        });
+      }
+      if (!conversation && tx.conversation.findUnique) {
+        conversation = await tx.conversation.findUnique({
+          where: {
+            jobId_freelancerId: {
+              jobId,
+              freelancerId,
+            },
+          },
+          select: { id: true },
+        });
+      }
 
       if (!conversation) {
         conversation = await tx.conversation.create({

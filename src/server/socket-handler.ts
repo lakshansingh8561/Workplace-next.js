@@ -150,6 +150,19 @@ export function setupSocketHandlers(io: WorkPulseSocketServer) {
       }
     });
 
+    // Handle contract room join & leave for real-time milestone synchronization
+    socket.on("contract:join", ({ contractId }) => {
+      if (contractId) {
+        socket.join(`contract:${contractId}`);
+      }
+    });
+
+    socket.on("contract:leave", ({ contractId }) => {
+      if (contractId) {
+        socket.leave(`contract:${contractId}`);
+      }
+    });
+
     // Handle Real-Time Message Sending
     socket.on("message:send", async ({ conversationId, content, clientMessageId }, callback) => {
       try {

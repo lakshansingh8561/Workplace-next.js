@@ -287,7 +287,7 @@ describe("Phase 3 Batch 2: Interview Invitations & Pre-Hire Conversations (Unit 
       expect(res.error).toMatch(/verify your email/i);
     });
 
-    it("enforces rate limiting (10 invitations/hr)", async () => {
+    it("enforces rate limiting (10 invitations/hr)", async () => {                                 
       (getCurrentUser as any).mockResolvedValue(verifiedClientUser);
       (checkRateLimit as any).mockResolvedValue({
         success: false,

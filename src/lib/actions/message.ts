@@ -164,7 +164,31 @@ export async function getOrCreateConversationForContractAction(
       }
     }
 
-    // 3. If still not found, create new conversation for the contract
+    // 3. If not found, check if ANY conversation already exists between this client and freelancer (unified single space)
+    if (!conversation) {
+      const existingPair = await prisma.conversation.findFirst({
+        where: {
+          clientId: contract.clientId,
+          freelancerId: contract.freelancerId,
+        },
+        orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+        select: { id: true, contractId: true },
+      });
+
+      if (existingPair) {
+        conversation = await prisma.conversation.update({
+          where: { id: existingPair.id },
+          data: {
+            contractId: contract.id,
+            type: "CONTRACT",
+            ...(contract.jobId ? { jobId: contract.jobId } : {}),
+          },
+          select: { id: true },
+        });
+      }
+    }
+
+    // 4. If still not found, create new conversation for the contract
     if (!conversation) {
       try {
         conversation = await prisma.conversation.create({
@@ -354,16 +378,30 @@ export async function getOrCreatePreHireConversationAction(
       }
     }
 
-    // Check if conversation already exists for (jobId, freelancerId)
-    let conversation = await prisma.conversation.findUnique({
-      where: {
-        jobId_freelancerId: {
-          jobId: validJobId,
+    // Check if conversation already exists between client and freelancer (unified single space)
+    let conversation = null;
+    if (prisma.conversation.findFirst) {
+      conversation = await prisma.conversation.findFirst({
+        where: {
+          clientId: actualClientId,
           freelancerId: actualFreelancerId,
         },
-      },
-      select: { id: true },
-    });
+        orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+        select: { id: true },
+      });
+    }
+
+    if (!conversation && prisma.conversation.findUnique) {
+      conversation = await prisma.conversation.findUnique({
+        where: {
+          jobId_freelancerId: {
+            jobId: validJobId,
+            freelancerId: actualFreelancerId,
+          },
+        },
+        select: { id: true },
+      });
+    }
 
     if (conversation) {
       return {
@@ -583,10 +621,21 @@ export async function getOrCreateDirectConversationAction(
       }
     }
 
-    // 2. Check for ANY existing conversation between this client and freelancer (by job or direct pair)
+    // 2. Check for ANY existing conversation between this client and freelancer (unified single space)
     let existingConversation = null;
 
-    if (targetJobId) {
+    if (prisma.conversation.findFirst) {
+      existingConversation = await prisma.conversation.findFirst({
+        where: {
+          clientId: actualClientId,
+          freelancerId: actualFreelancerId,
+        },
+        orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+        select: { id: true },
+      });
+    }
+
+    if (!existingConversation && targetJobId && prisma.conversation.findUnique) {
       const candidateByJob = await prisma.conversation.findUnique({
         where: {
           jobId_freelancerId: {
@@ -604,17 +653,6 @@ export async function getOrCreateDirectConversationAction(
       ) {
         existingConversation = candidateByJob;
       }
-    }
-
-    if (!existingConversation) {
-      existingConversation = await prisma.conversation.findFirst({
-        where: {
-          clientId: actualClientId,
-          freelancerId: actualFreelancerId,
-        },
-        orderBy: { lastMessageAt: "desc" },
-        select: { id: true },
-      });
     }
 
     if (existingConversation) {
@@ -739,6 +777,140 @@ export async function getOrCreateDirectConversationAction(
   }
 }
 
+/**
+ * Automatically consolidates duplicate conversation records between the same (clientId, freelancerId) pair
+ * so there is strictly ONE unified conversation space per client-freelancer relationship.
+ * Seamlessly migrates all messages and interview invitations into the canonical conversation thread.
+ */
+async function consolidateConversationsForUser(userId: string) {
+  try {
+    if (!prisma.conversation.findMany) return;
+
+    const rawConversations = await prisma.conversation.findMany({
+      where: {
+        OR: [{ clientId: userId }, { freelancerId: userId }],
+      },
+      include: {
+        contract: { select: { id: true, status: true, title: true } },
+        interviewInvitation: { select: { id: true } },
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { createdAt: true },
+        },
+      },
+      orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+    });
+
+    if (!rawConversations || rawConversations.length <= 1) return;
+
+    // Group by pair key: `${clientId}_${freelancerId}`
+    const pairMap = new Map<string, typeof rawConversations>();
+    for (const conv of rawConversations) {
+      const key = `${conv.clientId}_${conv.freelancerId}`;
+      const group = pairMap.get(key) || [];
+      group.push(conv);
+      pairMap.set(key, group);
+    }
+
+    for (const [, convList] of pairMap) {
+      if (convList.length <= 1) continue;
+
+      // Select canonical conversation:
+      // Priority 1: Has active CONTRACT
+      // Priority 2: Has any contractId
+      // Priority 3: Has messages
+      // Priority 4: Most recent
+      let canonical = convList.find((c) => Boolean(c.contractId && c.type === "CONTRACT"));
+      if (!canonical) {
+        canonical = convList.find((c) => Boolean(c.contractId));
+      }
+      if (!canonical) {
+        canonical = convList.find((c) => c.messages && c.messages.length > 0);
+      }
+      if (!canonical) {
+        canonical = convList[0];
+      }
+
+      const duplicates = convList.filter((c) => c.id !== canonical!.id);
+
+      for (const dup of duplicates) {
+        // 1. Reassign all messages from duplicate conversation to canonical conversation
+        if (prisma.message.updateMany) {
+          try {
+            await prisma.message.updateMany({
+              where: { conversationId: dup.id },
+              data: { conversationId: canonical.id },
+            });
+          } catch (err) {
+            console.warn("[WorkPulse Conversation Merge] Message migration warning:", err);
+          }
+        }
+
+        // 2. Transfer interview invitation if needed
+        if (dup.interviewInvitation && !canonical.interviewInvitation && prisma.interviewInvitation?.update) {
+          try {
+            await prisma.interviewInvitation.update({
+              where: { id: dup.interviewInvitation.id },
+              data: { conversationId: canonical.id },
+            });
+            canonical.interviewInvitation = dup.interviewInvitation;
+          } catch (err) {
+            console.warn("[WorkPulse Conversation Merge] Invitation transfer warning:", err);
+          }
+        }
+
+        // 3. Adopt contractId if canonical lacked one
+        if (!canonical.contractId && dup.contractId && prisma.conversation.update) {
+          try {
+            await prisma.conversation.update({
+              where: { id: canonical.id },
+              data: {
+                contractId: dup.contractId,
+                type: "CONTRACT",
+                ...(dup.jobId ? { jobId: dup.jobId } : {}),
+              },
+            });
+            canonical.contractId = dup.contractId;
+          } catch (err) {
+            console.warn("[WorkPulse Conversation Merge] Contract adoption warning:", err);
+          }
+        }
+
+        // 4. Safely delete the redundant conversation
+        if (prisma.conversation.delete) {
+          try {
+            await prisma.conversation.delete({
+              where: { id: dup.id },
+            });
+          } catch (delErr) {
+            console.warn("[WorkPulse Conversation Merge] Duplicate deletion warning:", delErr);
+          }
+        }
+      }
+
+      // 5. Update canonical conversation's lastMessageAt to the latest message timestamp
+      if (prisma.message.findFirst && prisma.conversation.update) {
+        try {
+          const latestMsg = await prisma.message.findFirst({
+            where: { conversationId: canonical.id },
+            orderBy: { createdAt: "desc" },
+            select: { createdAt: true },
+          });
+          if (latestMsg && latestMsg.createdAt > canonical.lastMessageAt) {
+            await prisma.conversation.update({
+              where: { id: canonical.id },
+              data: { lastMessageAt: latestMsg.createdAt },
+            });
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn("[WorkPulse Consolidate Conversations Error]:", err);
+  }
+}
+
 export interface GetConversationsOptions {
   limit?: number;
   cursor?: string;
@@ -793,7 +965,10 @@ export async function getConversationsAction(
   const safeLimit = Math.min(Math.max(limit, 1), 100);
 
   try {
-    // Auto-heal / sync missing conversations for all user's contracts
+    // 1. Consolidate any duplicate conversation records between the same (clientId, freelancerId) pair
+    await consolidateConversationsForUser(user.id);
+
+    // 2. Auto-heal / sync missing conversations for all user's contracts
     try {
       const missingContracts = await prisma.contract.findMany({
         where: {
@@ -812,7 +987,17 @@ export async function getConversationsAction(
 
       for (const missingContract of missingContracts) {
         let existingConv = null;
-        if (missingContract.jobId) {
+        if (prisma.conversation.findFirst) {
+          existingConv = await prisma.conversation.findFirst({
+            where: {
+              clientId: missingContract.clientId,
+              freelancerId: missingContract.freelancerId,
+            },
+            orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+            select: { id: true },
+          });
+        }
+        if (!existingConv && missingContract.jobId && prisma.conversation.findUnique) {
           existingConv = await prisma.conversation.findUnique({
             where: {
               jobId_freelancerId: {
@@ -915,8 +1100,19 @@ export async function getConversationsAction(
     ]);
 
     const hasMore = rawConversations.length > safeLimit;
-    const conversations = hasMore ? rawConversations.slice(0, safeLimit) : rawConversations;
-    const nextCursor = hasMore ? conversations[conversations.length - 1]?.id ?? null : null;
+    const baseConversations = hasMore ? rawConversations.slice(0, safeLimit) : rawConversations;
+    const nextCursor = hasMore ? baseConversations[baseConversations.length - 1]?.id ?? null : null;
+
+    // Strictly guarantee 1 conversation entry per counterparty user
+    const seenCounterparties = new Set<string>();
+    const conversations = [];
+    for (const c of baseConversations) {
+      const counterpartyId = user.id === c.clientId ? c.freelancerId : c.clientId;
+      if (!seenCounterparties.has(counterpartyId)) {
+        seenCounterparties.add(counterpartyId);
+        conversations.push(c);
+      }
+    }
 
     // Single aggregation query to eliminate N+1 unread count queries
     const conversationIds = conversations.map((c) => c.id);
@@ -1022,7 +1218,7 @@ export async function getConversationsAction(
     return {
       success: true,
       conversations: conversationSummaries,
-      totalCount,
+      totalCount: typeof totalCount === "number" ? totalCount : conversations.length,
       hasMore,
       nextCursor,
     };
@@ -1118,7 +1314,7 @@ export async function getMessagesAction(
   }
 
   try {
-    const conversation = await prisma.conversation.findUnique({
+    let conversation = await prisma.conversation.findUnique({
       where: { id: parsed.data.conversationId },
       include: {
         contract: {
@@ -1160,6 +1356,26 @@ export async function getMessagesAction(
         },
       },
     });
+
+    // If conversation was consolidated/merged into a canonical thread, resolve it gracefully
+    if (!conversation && prisma.conversation.findFirst) {
+      const fallback = await prisma.conversation.findFirst({
+        where: {
+          OR: [{ clientId: user.id }, { freelancerId: user.id }],
+        },
+        orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+        include: {
+          contract: { select: { id: true, title: true, status: true } },
+          job: { select: { id: true, title: true, status: true } },
+          interviewInvitation: { select: { id: true, status: true, expiresAt: true } },
+          client: { select: { id: true, name: true, image: true, role: true } },
+          freelancer: { select: { id: true, name: true, image: true, role: true } },
+        },
+      });
+      if (fallback) {
+        conversation = fallback;
+      }
+    }
 
     if (!conversation) {
       return {

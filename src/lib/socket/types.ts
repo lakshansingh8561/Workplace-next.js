@@ -32,6 +32,13 @@ export interface ServerToClientEvents {
     senderId: string;
   }) => void;
 
+  // Real-time contract and milestone state update
+  "contract:updated": (payload: {
+    contractId: string;
+    milestoneId?: string;
+    status?: string;
+  }) => void;
+
   // Error notifications
   "socket:error": (payload: { message: string; code?: string }) => void;
 }
@@ -45,6 +52,12 @@ export interface ClientToServerEvents {
 
   // Leave a conversation room
   "conversation:leave": (payload: { conversationId: string }) => void;
+
+  // Join a contract room for real-time milestone synchronization
+  "contract:join": (payload: { contractId: string }) => void;
+
+  // Leave a contract room
+  "contract:leave": (payload: { contractId: string }) => void;
 
   // Send message over WebSockets
   "message:send": (

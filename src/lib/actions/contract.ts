@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { verifyUserForAction } from "@/lib/session";
+import { verifyUserForAction, getCurrentUser } from "@/lib/session";
 import {
   CreateMilestoneSchema,
   MilestoneActionSchema,
@@ -19,6 +19,8 @@ import {
   ProposalStatus,
 } from "@prisma/client";
 import { createNotificationSafe } from "@/lib/actions/notification";
+import { broadcastContractEventToSocketServer } from "@/lib/socket/broadcast";
+import type { ContractDetail } from "@/components/contracts/ContractDetailsView";
 
 export type MilestoneActionResult = {
   success: boolean;
@@ -405,6 +407,18 @@ export async function submitMilestoneAction(
       idempotencyKey: `milestone:${txResult.milestone.id}:submitted:v${txResult.milestone.lifecycleVersion}`,
     });
 
+    // Real-Time Bridge: notify client browser immediately via WebSocket
+    try {
+      broadcastContractEventToSocketServer(
+        milestone.contract.id,
+        milestone.contract.clientId,
+        txResult.milestone.id,
+        "SUBMITTED"
+      ).catch(() => {});
+    } catch {
+      // Non-blocking
+    }
+
     return {
       success: true,
       milestoneId: txResult.milestone.id,
@@ -454,6 +468,15 @@ export async function submitMilestoneAction(
                 idempotencyKey: expectedKey,
               });
             }
+
+            try {
+              broadcastContractEventToSocketServer(
+                fresh.contract.id,
+                fresh.contract.clientId,
+                fresh.id,
+                "SUBMITTED"
+              ).catch(() => {});
+            } catch {}
 
             return {
               success: true,
@@ -692,6 +715,18 @@ export async function approveMilestoneAction(
       idempotencyKey: `milestone:${txResult.milestone.id}:approved:v${txResult.milestone.lifecycleVersion}`,
     });
 
+    // Real-Time Bridge: notify freelancer browser immediately via WebSocket
+    try {
+      broadcastContractEventToSocketServer(
+        milestone.contract.id,
+        milestone.contract.freelancerId,
+        txResult.milestone.id,
+        "APPROVED"
+      ).catch(() => {});
+    } catch {
+      // Non-blocking
+    }
+
     return {
       success: true,
       milestoneId: txResult.milestone.id,
@@ -873,6 +908,18 @@ export async function requestMilestoneChangesAction(
       link: `/contracts/${milestone.contract.id}`,
       idempotencyKey: `milestone:${milestone.id}:revision:v${updated.lifecycleVersion}`,
     });
+
+    // Real-Time Bridge: notify freelancer browser immediately via WebSocket
+    try {
+      broadcastContractEventToSocketServer(
+        milestone.contract.id,
+        milestone.contract.freelancerId,
+        milestone.id,
+        "REVISION_REQUESTED"
+      ).catch(() => {});
+    } catch {
+      // Non-blocking
+    }
 
     return {
       success: true,
@@ -1132,6 +1179,18 @@ export async function updateContractStatusAction(
       link: `/contracts/${contract.id}`,
       idempotencyKey: `contract:${updated.id}:status:${targetStatus}:v${updated.lifecycleVersion}`,
     });
+
+    // Real-Time Bridge: notify participants immediately via WebSocket
+    try {
+      broadcastContractEventToSocketServer(
+        contract.id,
+        contract.freelancerId,
+        undefined,
+        targetStatus
+      ).catch(() => {});
+    } catch {
+      // Non-blocking
+    }
 
     return {
       success: true,
@@ -1423,4 +1482,173 @@ export async function deleteContractAction(
     };
   }
 }
+
+/**
+ * Server Action to fetch fresh contract details for real-time synchronization.
+ * Authorizes that the requester is a member of the contract (client or freelancer).
+ */
+export async function getContractDetailsAction(
+  contractId: string
+): Promise<{ success: boolean; contract?: ContractDetail; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    if (!contractId || !/^[0-9a-fA-F]{24}$/.test(contractId)) {
+      return { success: false, error: "Invalid contract ID" };
+    }
+
+    const rawContract = await prisma.contract.findUnique({
+      where: { id: contractId },
+      select: {
+        id: true,
+        jobId: true,
+        title: true,
+        type: true,
+        totalAmount: true,
+        hourlyRate: true,
+        terms: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        clientId: true,
+        freelancerId: true,
+        client: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            role: true,
+          },
+        },
+        freelancer: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+            role: true,
+          },
+        },
+        milestones: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            amount: true,
+            dueDate: true,
+            status: true,
+            isPaid: true,
+            paidAt: true,
+            submissions: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!rawContract) {
+      return { success: false, error: "Contract not found" };
+    }
+
+    // Verify user is a member of this contract
+    if (rawContract.clientId !== user.id && rawContract.freelancerId !== user.id) {
+      return { success: false, error: "Forbidden: You are not a participant in this contract" };
+    }
+
+    const paidMilestoneMap = new Map<string, Date>();
+    try {
+      const successfulPayments = await prisma.payment.findMany({
+        where: {
+          contractId: rawContract.id,
+          itemType: "MILESTONE",
+          status: "SUCCESS",
+        },
+        select: { milestoneId: true, paidAt: true },
+      });
+      for (const p of successfulPayments) {
+        if (p.milestoneId && p.paidAt) {
+          paidMilestoneMap.set(p.milestoneId, p.paidAt);
+        }
+      }
+    } catch {
+      // payments collection fallback
+    }
+
+    const contract: ContractDetail = {
+      id: rawContract.id,
+      jobId: rawContract.jobId,
+      title: rawContract.title,
+      type: rawContract.type,
+      totalAmount: rawContract.totalAmount,
+      hourlyRate: rawContract.hourlyRate,
+      terms: rawContract.terms,
+      status: rawContract.status,
+      startDate: rawContract.startDate.toISOString(),
+      endDate: rawContract.endDate?.toISOString() || null,
+      clientId: rawContract.clientId,
+      freelancerId: rawContract.freelancerId,
+      client: rawContract.client,
+      freelancer: rawContract.freelancer,
+      milestones: rawContract.milestones.map((m) => {
+        const isPaidFromPayment = paidMilestoneMap.has(m.id);
+        const isPaidFromMilestone = Boolean((m as { isPaid?: boolean }).isPaid);
+        const isPaid = isPaidFromPayment || isPaidFromMilestone;
+        const paidDate =
+          paidMilestoneMap.get(m.id) ||
+          (m as { paidAt?: Date | null }).paidAt ||
+          null;
+
+        const submissions = (m.submissions || []).map((sub) => ({
+          id: sub.id,
+          freelancerId: sub.freelancerId,
+          description: sub.description,
+          status: sub.status,
+          submittedAt: sub.submittedAt.toISOString(),
+          reviewedAt: sub.reviewedAt?.toISOString() || null,
+          reviewerId: sub.reviewerId || null,
+          revisionFeedback: sub.revisionFeedback || null,
+          attachments: (sub.attachments || []).map((att) => ({
+            id: att.id,
+            fileName: att.fileName,
+            fileUrl: att.fileUrl,
+            fileType: att.fileType,
+            fileSize: att.fileSize,
+            storageProvider: att.storageProvider || null,
+            createdAt: att.createdAt.toISOString(),
+          })),
+          links: (sub.links || []).map((lnk) => ({
+            id: lnk.id,
+            title: lnk.title || null,
+            url: lnk.url,
+            createdAt: lnk.createdAt.toISOString(),
+          })),
+          createdAt: sub.createdAt.toISOString(),
+          updatedAt: sub.updatedAt.toISOString(),
+        }));
+
+        return {
+          id: m.id,
+          title: m.title,
+          description: m.description,
+          amount: m.amount,
+          dueDate: m.dueDate?.toISOString() || null,
+          status: m.status,
+          isPaid,
+          paidAt: paidDate ? paidDate.toISOString() : null,
+          submissions,
+          createdAt: m.createdAt.toISOString(),
+        };
+      }),
+    };
+
+    return { success: true, contract };
+  } catch (error) {
+    console.error("[WorkPulse Get Contract Details Error]:", error);
+    return { success: false, error: "Failed to fetch contract details" };
+  }
+}
+
 

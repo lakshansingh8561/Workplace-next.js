@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui/Avatar";
-import { SearchFreelancersResult } from "@/lib/actions/freelancer-discovery";
+import {
+  searchFreelancersAction,
+  SearchFreelancersResult,
+} from "@/lib/actions/freelancer-discovery";
 import { getOrCreateDirectConversationAction } from "@/lib/actions/message";
 import { DirectHireModal } from "@/components/dashboard/DirectHireModal";
 
@@ -16,18 +19,21 @@ export function FreelancerDiscoveryView({
   initialData,
 }: FreelancerDiscoveryViewProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const [isPending, startTransition] = useTransition();
 
-  // Controlled filter state synced from URL search params
-  const [query, setQuery] = useState(searchParams?.get("query") || "");
-  const [selectedSkill, setSelectedSkill] = useState(searchParams?.get("skill") || "ALL");
-  const [experience, setExperience] = useState(searchParams?.get("experience") || "ALL");
-  const [minRate, setMinRate] = useState(searchParams?.get("minRate") || "");
-  const [maxRate, setMaxRate] = useState(searchParams?.get("maxRate") || "");
-  const [availability, setAvailability] = useState(searchParams?.get("isAvailable") || "ALL");
-  const [minRating, setMinRating] = useState(searchParams?.get("minRating") || "ALL");
-  const [sortBy, setSortBy] = useState(searchParams?.get("sort") || "rating");
+  // Active reactive state for search results & pagination
+  const [data, setData] = useState<SearchFreelancersResult>(initialData);
+  const [isFetching, setIsFetching] = useState(false);
+
+  // Controlled filter state
+  const [query, setQuery] = useState("");
+  const [selectedSkill, setSelectedSkill] = useState("ALL");
+  const [experience, setExperience] = useState("ALL");
+  const [minRate, setMinRate] = useState("");
+  const [maxRate, setMaxRate] = useState("");
+  const [availability, setAvailability] = useState("ALL");
+  const [minRating, setMinRating] = useState("ALL");
+  const [sortBy, setSortBy] = useState("rating");
+
   const [activeChatFreelancerId, setActiveChatFreelancerId] = useState<string | null>(null);
   const [hireFreelancer, setHireFreelancer] = useState<{
     id: string;
@@ -35,6 +41,78 @@ export function FreelancerDiscoveryView({
     rate?: number | null;
   } | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
+
+  // Initialize filter state from URL on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      setQuery(url.searchParams.get("query") || "");
+      setSelectedSkill(url.searchParams.get("skill") || "ALL");
+      setExperience(url.searchParams.get("experience") || "ALL");
+      setMinRate(url.searchParams.get("minRate") || "");
+      setMaxRate(url.searchParams.get("maxRate") || "");
+      setAvailability(url.searchParams.get("isAvailable") || "ALL");
+      setMinRating(url.searchParams.get("minRating") || "ALL");
+      setSortBy(url.searchParams.get("sort") || "rating");
+    }
+  }, []);
+
+  // Direct pagination handler for Next and Previous buttons
+  const handlePageChange = useCallback(
+    async (newPage: number) => {
+      if (newPage < 1 || newPage > data.totalPages || isFetching) return;
+
+      setIsFetching(true);
+
+      const params = new URLSearchParams(window.location.search);
+      if (newPage === 1) {
+        params.delete("page");
+      } else {
+        params.set("page", String(newPage));
+      }
+      const queryString = params.toString();
+      const newUrl = queryString ? `/freelancers?${queryString}` : "/freelancers";
+      window.history.pushState(null, "", newUrl);
+
+      try {
+        const res = await searchFreelancersAction({
+          query: query || undefined,
+          skill: selectedSkill !== "ALL" ? selectedSkill : undefined,
+          experience: experience !== "ALL" ? experience : undefined,
+          minRate: minRate ? parseFloat(minRate) : undefined,
+          maxRate: maxRate ? parseFloat(maxRate) : undefined,
+          isAvailable: availability === "true" ? true : availability === "false" ? false : undefined,
+          minRating: minRating !== "ALL" ? parseFloat(minRating) : undefined,
+          sort: (sortBy as "rating" | "rate_asc" | "rate_desc" | "recent") || "rating",
+          page: newPage,
+          limit: 12,
+        });
+
+        if (res && res.success) {
+          setData(res);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      } catch (err) {
+        console.error("[WorkPulse Pagination Error]:", err);
+      } finally {
+        setIsFetching(false);
+      }
+    },
+    [data.totalPages, isFetching, query, selectedSkill, experience, minRate, maxRate, availability, minRating, sortBy]
+  );
+
+  // Sync when user clicks browser Back or Forward button
+  useEffect(() => {
+    const handlePopState = () => {
+      const url = new URL(window.location.href);
+      const pageFromUrl = parseInt(url.searchParams.get("page") || "1", 10);
+      const targetPage = isNaN(pageFromUrl) ? 1 : pageFromUrl;
+      handlePageChange(targetPage);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [handlePageChange]);
 
   const handleMessageFreelancer = async (freelancerId: string) => {
     setActiveChatFreelancerId(freelancerId);
@@ -59,23 +137,54 @@ export function FreelancerDiscoveryView({
     }
   };
 
-  const applyFilters = (newParams: Record<string, string>) => {
-    const params = new URLSearchParams(searchParams ? searchParams.toString() : "");
-    Object.entries(newParams).forEach(([k, v]) => {
-      if (!v || v === "ALL") {
-        params.delete(k);
-      } else {
-        params.set(k, v);
-      }
-    });
-    // Reset page to 1 when filters change
-    if (!newParams.page) {
-      params.delete("page");
-    }
+  const applyFilters = async (newParams: Record<string, string>) => {
+    setIsFetching(true);
 
-    startTransition(() => {
-      router.push(`/freelancers?${params.toString()}`);
-    });
+    const q = newParams.query !== undefined ? newParams.query : query;
+    const s = newParams.skill !== undefined ? newParams.skill : selectedSkill;
+    const exp = newParams.experience !== undefined ? newParams.experience : experience;
+    const minR = newParams.minRate !== undefined ? newParams.minRate : minRate;
+    const maxR = newParams.maxRate !== undefined ? newParams.maxRate : maxRate;
+    const avail = newParams.isAvailable !== undefined ? newParams.isAvailable : availability;
+    const minRat = newParams.minRating !== undefined ? newParams.minRating : minRating;
+    const srt = newParams.sort !== undefined ? newParams.sort : sortBy;
+
+    const params = new URLSearchParams();
+    if (q) params.set("query", q);
+    if (s && s !== "ALL") params.set("skill", s);
+    if (exp && exp !== "ALL") params.set("experience", exp);
+    if (minR) params.set("minRate", minR);
+    if (maxR) params.set("maxRate", maxR);
+    if (avail && avail !== "ALL") params.set("isAvailable", avail);
+    if (minRat && minRat !== "ALL") params.set("minRating", minRat);
+    if (srt && srt !== "rating") params.set("sort", srt);
+
+    const queryString = params.toString();
+    const newUrl = queryString ? `/freelancers?${queryString}` : "/freelancers";
+    window.history.pushState(null, "", newUrl);
+
+    try {
+      const res = await searchFreelancersAction({
+        query: q || undefined,
+        skill: s && s !== "ALL" ? s : undefined,
+        experience: exp && exp !== "ALL" ? exp : undefined,
+        minRate: minR ? parseFloat(minR) : undefined,
+        maxRate: maxR ? parseFloat(maxR) : undefined,
+        isAvailable: avail === "true" ? true : avail === "false" ? false : undefined,
+        minRating: minRat && minRat !== "ALL" ? parseFloat(minRat) : undefined,
+        sort: (srt as "rating" | "rate_asc" | "rate_desc" | "recent") || "rating",
+        page: 1,
+        limit: 12,
+      });
+
+      if (res && res.success) {
+        setData(res);
+      }
+    } catch (err) {
+      console.error("[WorkPulse Filter Error]:", err);
+    } finally {
+      setIsFetching(false);
+    }
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -91,7 +200,7 @@ export function FreelancerDiscoveryView({
     });
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     setQuery("");
     setSelectedSkill("ALL");
     setExperience("ALL");
@@ -101,13 +210,22 @@ export function FreelancerDiscoveryView({
     setMinRating("ALL");
     setSortBy("rating");
 
-    startTransition(() => {
-      router.push("/freelancers");
-    });
-  };
-
-  const handlePageChange = (newPage: number) => {
-    applyFilters({ page: String(newPage) });
+    window.history.pushState(null, "", "/freelancers");
+    setIsFetching(true);
+    try {
+      const res = await searchFreelancersAction({
+        page: 1,
+        limit: 12,
+        sort: "rating",
+      });
+      if (res && res.success) {
+        setData(res);
+      }
+    } catch (err) {
+      console.error("[WorkPulse Clear Filters Error]:", err);
+    } finally {
+      setIsFetching(false);
+    }
   };
 
   const hasActiveFilters = Boolean(
@@ -121,7 +239,8 @@ export function FreelancerDiscoveryView({
       sortBy !== "rating"
   );
 
-  const freelancers = initialData.freelancers || [];
+  const freelancers = data.freelancers || [];
+  const popularSkills = data.topSkills && data.topSkills.length > 0 ? data.topSkills : initialData.topSkills || [];
 
   return (
     <div className="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
@@ -180,10 +299,10 @@ export function FreelancerDiscoveryView({
 
             <button
               type="submit"
-              disabled={isPending}
+              disabled={isFetching}
               className="rounded-2xl bg-emerald-600 px-6 py-3 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-emerald-500 disabled:opacity-50 transition sm:w-auto w-full"
             >
-              {isPending ? "Searching..." : "Search"}
+              {isFetching ? "Searching..." : "Search"}
             </button>
           </div>
 
@@ -303,7 +422,7 @@ export function FreelancerDiscoveryView({
         </form>
 
         {/* Skill Pills */}
-        {initialData.topSkills.length > 0 && (
+        {popularSkills.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-zinc-100 dark:border-zinc-800/80">
             <span className="text-[11px] font-bold text-zinc-400 mr-1 uppercase tracking-wider">
               Popular Skills:
@@ -322,7 +441,7 @@ export function FreelancerDiscoveryView({
             >
               All Skills
             </button>
-            {initialData.topSkills.map((sk) => (
+            {popularSkills.map((sk) => (
               <button
                 key={sk}
                 type="button"
@@ -347,7 +466,7 @@ export function FreelancerDiscoveryView({
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400 pt-2 border-t border-zinc-100 dark:border-zinc-800/80">
           <span>
             Found <strong className="text-zinc-900 dark:text-zinc-100">{freelancers.length}</strong> of{" "}
-            <strong className="text-zinc-900 dark:text-zinc-100">{initialData.totalCount}</strong> verified public freelancers
+            <strong className="text-zinc-900 dark:text-zinc-100">{data.totalCount}</strong> verified public freelancers
           </span>
           {hasActiveFilters && (
             <button
@@ -395,7 +514,11 @@ export function FreelancerDiscoveryView({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div
+          className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-opacity duration-200 ${
+            isFetching ? "opacity-50 pointer-events-none" : "opacity-100"
+          }`}
+        >
           {freelancers.map((f) => (
             <div
               key={f.id}
@@ -527,23 +650,23 @@ export function FreelancerDiscoveryView({
       )}
 
       {/* Pagination Controls */}
-      {initialData.totalPages > 1 && (
+      {data.totalPages > 1 && (
         <div className="mt-10 flex items-center justify-center gap-2">
           <button
             type="button"
-            disabled={initialData.page <= 1 || isPending}
-            onClick={() => handlePageChange(initialData.page - 1)}
+            disabled={data.page <= 1 || isFetching}
+            onClick={() => handlePageChange(data.page - 1)}
             className="rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 transition"
           >
             ← Previous
           </button>
           <span className="text-xs font-semibold text-zinc-500 px-3">
-            Page {initialData.page} of {initialData.totalPages}
+            {isFetching ? "Loading..." : `Page ${data.page} of ${data.totalPages}`}
           </span>
           <button
             type="button"
-            disabled={initialData.page >= initialData.totalPages || isPending}
-            onClick={() => handlePageChange(initialData.page + 1)}
+            disabled={data.page >= data.totalPages || isFetching}
+            onClick={() => handlePageChange(data.page + 1)}
             className="rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 transition"
           >
             Next →

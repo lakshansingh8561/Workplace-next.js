@@ -61,3 +61,54 @@ export async function broadcastMessageToSocketServer(
   }
 }
 
+/**
+ * Dispatches an internal HTTP broadcast for contract and milestone lifecycle events.
+ * Immediately alerts connected clients across browser tabs and independent devices.
+ */
+export async function broadcastContractEventToSocketServer(
+  contractId: string,
+  counterpartyId?: string,
+  milestoneId?: string,
+  status?: string
+): Promise<boolean> {
+  if (!contractId) {
+    return false;
+  }
+
+  try {
+    const baseUrl =
+      process.env.INTERNAL_SOCKET_URL ||
+      process.env.SOCKET_SERVER_URL ||
+      process.env.NEXT_PUBLIC_SOCKET_URL ||
+      (process.env.VERCEL || process.env.NODE_ENV === "production"
+        ? "https://workplace-next-js.onrender.com"
+        : getSocketServerUrl());
+
+    const cleanBaseUrl = baseUrl.replace(/\/$/, "");
+    const endpoint = `${cleanBaseUrl}/api/socket/broadcast`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contractId,
+        counterpartyId,
+        milestoneId,
+        status,
+        secret: SECRET,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+

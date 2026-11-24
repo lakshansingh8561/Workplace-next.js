@@ -87,7 +87,7 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       try {
         const payload = JSON.parse(body);
-        const { conversationId, message, counterpartyId, secret } = payload;
+        const { conversationId, message, counterpartyId, secret, contractId, milestoneId, status } = payload;
 
         // Verify secret token for internal communication (supports production, fallback, and dedicated secrets)
         const isAuthorizedSecret =
@@ -99,6 +99,26 @@ const server = http.createServer((req, res) => {
         if (!isAuthorizedSecret) {
           res.writeHead(401, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ success: false, error: "Unauthorized" }));
+          return;
+        }
+
+        // Real-Time Contract & Milestone Event Broadcast
+        if (contractId && ioInstance) {
+          const roomName = `contract:${contractId}`;
+          ioInstance.to(roomName).emit("contract:updated", {
+            contractId,
+            milestoneId,
+            status,
+          });
+          if (counterpartyId) {
+            ioInstance.to(`user:${counterpartyId}`).emit("contract:updated", {
+              contractId,
+              milestoneId,
+              status,
+            });
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true, contractId, milestoneId, status }));
           return;
         }
 

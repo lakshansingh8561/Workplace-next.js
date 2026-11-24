@@ -522,29 +522,43 @@ export async function updateProposalStatusAction(
         });
 
         // 9. Atomic conversation conversion or creation:
-        // Upgrade pre-hire conversation to CONTRACT or create new CONTRACT conversation
-        let conversation = await tx.conversation.findUnique({
-          where: {
-            jobId_freelancerId: {
-              jobId: freshProposal.job.id,
+        // Upgrade existing conversation to CONTRACT or create new CONTRACT conversation
+        let conversation = null;
+        if (tx.conversation.findUnique) {
+          conversation = await tx.conversation.findUnique({
+            where: {
+              jobId_freelancerId: {
+                jobId: freshProposal.job.id,
+                freelancerId: freshProposal.freelancerId,
+              },
+            },
+            select: { id: true, type: true, contractId: true },
+          });
+        }
+        if (!conversation && tx.conversation.findFirst) {
+          conversation = await tx.conversation.findFirst({
+            where: {
+              clientId: user.id,
               freelancerId: freshProposal.freelancerId,
             },
-          },
-          select: { id: true, type: true, contractId: true },
-        });
+            orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+            select: { id: true, type: true, contractId: true },
+          });
+        }
 
         if (conversation) {
-          // Pre-hire conversation exists: upgrade to CONTRACT and bind newly formed contract
+          // Existing conversation exists between this pair: upgrade to CONTRACT and bind newly formed contract
           conversation = await tx.conversation.update({
             where: { id: conversation.id },
             data: {
               contractId: newContract.id,
+              jobId: freshProposal.job.id,
               type: "CONTRACT",
             },
             select: { id: true, type: true, contractId: true },
           });
         } else {
-          // No prior pre-hire conversation: establish new CONTRACT conversation thread
+          // No prior conversation: establish new CONTRACT conversation thread
           conversation = await tx.conversation.create({
             data: {
               contractId: newContract.id,
