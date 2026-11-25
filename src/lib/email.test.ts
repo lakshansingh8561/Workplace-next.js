@@ -112,16 +112,86 @@ describe("Email Service & Provider Configuration", () => {
     expect(result.success).toBe(true);
     expect(result.messageId).toBe("smtp_msg_101");
 
-    // Verify transporter was initialized with timeouts and port 587
+    // Verify transporter was initialized with IPv4, timeouts, and port 587
     expect(nodemailer.createTransport).toHaveBeenCalledWith(
       expect.objectContaining({
         host: "smtp.gmail.com",
         port: 587,
+        family: 4,
         connectionTimeout: 8000,
         greetingTimeout: 8000,
         socketTimeout: 10000,
       })
     );
+  });
+
+  it("falls back to Resend HTTPS API when SMTP fails with IPv6 ETUNREACH and RESEND_API_KEY is configured", async () => {
+    process.env.EMAIL_USER = "user@gmail.com";
+    process.env.EMAIL_PASS = "abcdefghijklmnop";
+    process.env.RESEND_API_KEY = "re_fallback_key";
+
+    (nodemailer.createTransport as any).mockReturnValue({
+      sendMail: vi
+        .fn()
+        .mockRejectedValue(
+          new Error("connect ETUNREACH 2607:f8b0:400e:c0a::6a:465 - Local (::0)")
+        ),
+    });
+
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ id: "resend_fallback_123" }),
+    } as any);
+
+    const result = await sendEmail({
+      to: "recipient@example.com",
+      subject: "OTP Code",
+      html: "<p>123456</p>",
+      text: "123456",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.messageId).toBe("resend_fallback_123");
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://api.resend.com/emails",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer re_fallback_key",
+        }),
+        body: expect.stringContaining("onboarding@resend.dev"),
+      })
+    );
+  });
+
+  it("does not silently succeed when SMTP fails with ETUNREACH and Resend fallback rejects", async () => {
+    process.env.EMAIL_USER = "user@gmail.com";
+    process.env.EMAIL_PASS = "abcdefghijklmnop";
+    process.env.RESEND_API_KEY = "re_invalid_key";
+
+    (nodemailer.createTransport as any).mockReturnValue({
+      sendMail: vi
+        .fn()
+        .mockRejectedValue(
+          new Error("connect ETUNREACH 2607:f8b0:400e:c0a::6a:465 - Local (::0)")
+        ),
+    });
+
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: "API key is invalid" }),
+    } as any);
+
+    const result = await sendEmail({
+      to: "recipient@example.com",
+      subject: "OTP Code",
+      html: "<p>123456</p>",
+      text: "123456",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("RESEND_API_KEY");
   });
 
   it("returns user-friendly guidance when Gmail SMTP authentication fails (535)", async () => {

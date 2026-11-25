@@ -11,7 +11,17 @@
  * Never exposes raw tokens, API keys, or secrets in logs.
  */
 
+import dns from "dns";
 import nodemailer from "nodemailer";
+
+// Prefer IPv4 DNS resolution order globally in Node.js to avoid IPv6 ETUNREACH on hosts without IPv6 routing (e.g., Render)
+if (typeof dns.setDefaultResultOrder === "function") {
+  try {
+    dns.setDefaultResultOrder("ipv4first");
+  } catch {
+    // Ignore if unsupported in restricted runtime
+  }
+}
 
 export interface SendEmailOptions {
   to: string;
@@ -127,13 +137,244 @@ export function getAppBaseUrl(): string {
 /**
  * Dispatches an email via the configured provider or safe local simulation.
  */
+/**
+ * Resolves a Resend-compatible sender address.
+ * Never falls back to an unverified free webmail address (e.g. @gmail.com) for Resend.
+ */
+function resolveResendFromAddress(): string {
+  const explicitResendFrom = process.env.RESEND_FROM?.trim();
+  if (explicitResendFrom) {
+    return explicitResendFrom.includes("<")
+      ? explicitResendFrom
+      : `WorkPulse <${explicitResendFrom}>`;
+  }
+
+  const emailFrom = process.env.EMAIL_FROM?.trim();
+  if (emailFrom && !/@(gmail|yahoo|outlook|hotmail)\./i.test(emailFrom)) {
+    return emailFrom.includes("<") ? emailFrom : `WorkPulse <${emailFrom}>`;
+  }
+
+  return "WorkPulse <onboarding@resend.dev>";
+}
+
+/**
+ * Determines whether an SMTP error is a network/routing/port connectivity failure
+ * (where a Resend HTTPS fallback on port 443 can succeed).
+ */
+function isSmtpConnectivityError(errMsg: string): boolean {
+  return /ETUNREACH|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNREFUSED|ECONNRESET|EAI_AGAIN|connection timeout|Greeting never received/i.test(
+    errMsg
+  );
+}
+
+/**
+ * Dispatches an email via the Resend HTTP API over HTTPS (port 443).
+ * Verifies the actual HTTP response and returned message ID.
+ */
+async function sendViaResend({
+  apiKey,
+  fromAddress,
+  to,
+  subject,
+  html,
+  text,
+}: SendEmailOptions & { apiKey: string; fromAddress: string }): Promise<EmailDeliveryResult> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000); // 5-second fast timeout
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey.trim()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: fromAddress,
+        to: [to.trim().toLowerCase()],
+        subject,
+        html,
+        text,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorData = (await response.json().catch(() => ({}))) as {
+        message?: string;
+        name?: string;
+      };
+      const errorMsg = errorData.message || `HTTP ${response.status}`;
+      console.error(
+        `[WorkPulse Email Error] Resend API returned error (HTTP ${response.status}):`,
+        errorMsg
+      );
+
+      let userMsg = `Resend email delivery failed: ${errorMsg}`;
+      if (errorMsg.toLowerCase().includes("domain") && errorMsg.toLowerCase().includes("not verified")) {
+        userMsg =
+          "Email domain is not verified in Resend. Please set EMAIL_FROM to onboarding@resend.dev or verify your domain at resend.com.";
+      } else if (response.status === 401 || response.status === 403) {
+        userMsg = "Resend API key is invalid or unauthorized. Please verify RESEND_API_KEY.";
+      }
+
+      return {
+        success: false,
+        error: userMsg,
+      };
+    }
+
+    const result = (await response.json()) as { id?: string };
+    if (!result?.id) {
+      return {
+        success: false,
+        error: "Resend API did not return a valid message ID.",
+      };
+    }
+
+    return {
+      success: true,
+      messageId: result.id,
+    };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    const isAbort = err instanceof Error && err.name === "AbortError";
+    const errMsg = isAbort
+      ? "Connection to Resend API timed out (5s limit)"
+      : err instanceof Error
+      ? err.message
+      : "Network error";
+    console.error(
+      "[WorkPulse Email Error] Network exception connecting to Resend API:",
+      errMsg
+    );
+    return {
+      success: false,
+      error: isAbort
+        ? "Email provider request timed out. Please try again."
+        : "Network error delivering email.",
+    };
+  }
+}
+
+/**
+ * Dispatches an email via Nodemailer SMTP using IPv4-only socket resolution
+ * to prevent IPv6 ETUNREACH failures on hosts without IPv6 routing (e.g. Render).
+ */
+async function sendViaSmtp({
+  emailUser,
+  emailPass,
+  smtpHost,
+  smtpPort,
+  fromAddress,
+  to,
+  subject,
+  html,
+  text,
+  connectionTimeoutMs,
+}: SendEmailOptions & {
+  emailUser: string;
+  emailPass: string;
+  smtpHost: string;
+  smtpPort: number;
+  fromAddress: string;
+  connectionTimeoutMs: number;
+}): Promise<{ result: EmailDeliveryResult; isConnectivityFailure: boolean }> {
+  try {
+    const cleanPass = emailPass.replace(/\s+/g, "");
+    const isGmail =
+      emailUser.toLowerCase().includes("@gmail.com") ||
+      smtpHost.toLowerCase() === "smtp.gmail.com";
+
+    const targetHost = isGmail ? "smtp.gmail.com" : smtpHost;
+    const targetPort = smtpPort || 587;
+    const isSecure = targetPort === 465;
+
+    const transporter = nodemailer.createTransport({
+      host: targetHost,
+      port: targetPort,
+      secure: isSecure,
+      requireTLS: !isSecure,
+      family: 4, // Force IPv4 to avoid IPv6 ETUNREACH on containers without IPv6 routing
+      connectionTimeout: connectionTimeoutMs,
+      greetingTimeout: connectionTimeoutMs,
+      socketTimeout: 10000,
+      auth: {
+        user: emailUser.trim(),
+        pass: cleanPass,
+      },
+      tls: {
+        servername: targetHost,
+        rejectUnauthorized: process.env.NODE_ENV === "production",
+      },
+    } as nodemailer.TransportOptions);
+
+    const info = await transporter.sendMail({
+      from: fromAddress,
+      to: to.trim().toLowerCase(),
+      subject,
+      text,
+      html,
+    });
+
+    return {
+      result: {
+        success: true,
+        messageId: info.messageId,
+      },
+      isConnectivityFailure: false,
+    };
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : "SMTP error";
+    const connectivityFailure = isSmtpConnectivityError(errMsg);
+    console.error("[WorkPulse Email Error] SMTP delivery exception:", errMsg);
+
+    let userFriendlyError = `SMTP email delivery failed: ${errMsg}`;
+    if (
+      errMsg.includes("535") ||
+      errMsg.includes("Username and Password not accepted") ||
+      errMsg.includes("Invalid login") ||
+      errMsg.includes("BadCredentials")
+    ) {
+      userFriendlyError =
+        "Email authentication failed. If using Gmail, please ensure EMAIL_PASS is a 16-character Google App Password (not your personal Google account password).";
+    } else if (
+      errMsg.includes("ETIMEDOUT") ||
+      errMsg.includes("ESOCKETTIMEDOUT") ||
+      errMsg.includes("connection timeout") ||
+      errMsg.includes("Greeting never received")
+    ) {
+      userFriendlyError =
+        "Connection to SMTP server timed out. Cloud hosting may restrict direct SMTP ports; please configure RESEND_API_KEY for HTTPS (port 443) delivery.";
+    } else if (errMsg.includes("ETUNREACH") || errMsg.includes("ENETUNREACH")) {
+      userFriendlyError =
+        "SMTP network unreachable from host. Please configure RESEND_API_KEY in Render environment variables for HTTPS email delivery.";
+    } else if (errMsg.includes("ECONNREFUSED")) {
+      userFriendlyError =
+        "Connection refused by SMTP server. Please verify SMTP_HOST and SMTP_PORT.";
+    }
+
+    return {
+      result: {
+        success: false,
+        error: userFriendlyError,
+      },
+      isConnectivityFailure: connectivityFailure,
+    };
+  }
+}
+
+/**
+ * Dispatches an email via the configured provider or safe local simulation.
+ */
 export async function sendEmail({
   to,
   subject,
   html,
   text,
 }: SendEmailOptions): Promise<EmailDeliveryResult> {
-  const resendApiKey = process.env.RESEND_API_KEY;
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
   const emailUser = process.env.EMAIL_USER || process.env.SMTP_USER;
   const emailPass = process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
   const smtpHost =
@@ -143,12 +384,10 @@ export async function sendEmail({
     ? parseInt(process.env.SMTP_PORT, 10)
     : 587; // Default to port 587 (STARTTLS) which is universally permitted on cloud hosts
   const rawFrom = process.env.EMAIL_FROM || emailUser;
-  const fromAddress = rawFrom
+  const smtpFromAddress = rawFrom
     ? rawFrom.includes("<")
       ? rawFrom
       : `WorkPulse <${rawFrom}>`
-    : resendApiKey
-    ? "WorkPulse <onboarding@resend.dev>"
     : "WorkPulse <noreply@workpulse.internal>";
 
   // Automated test mode bypass (unless explicitly running live verification)
@@ -160,159 +399,60 @@ export async function sendEmail({
     };
   }
 
-  // 1. Production provider integration: Resend API (HTTP POST over port 443)
-  if (resendApiKey) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5-second fast timeout
+  const hasSmtp = Boolean(emailUser && emailPass && smtpHost);
+  const isRender = Boolean(
+    process.env.RENDER || process.env.RENDER_EXTERNAL_URL || process.env.RENDER_SERVICE_ID
+  );
 
-    try {
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendApiKey.trim()}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: fromAddress,
-          to: [to.trim().toLowerCase()],
-          subject,
-          html,
-          text,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+  // 1. If SMTP is configured, try IPv4 SMTP first (preserves Vercel Gmail SMTP path).
+  //    On Render when RESEND_API_KEY is also configured, use a 3.5s connect timeout so a
+  //    blocked SMTP port falls back to Resend HTTPS (port 443) well within the 9s action budget.
+  if (hasSmtp && emailUser && emailPass && smtpHost) {
+    const smtpAttempt = await sendViaSmtp({
+      emailUser,
+      emailPass,
+      smtpHost,
+      smtpPort,
+      fromAddress: smtpFromAddress,
+      to,
+      subject,
+      html,
+      text,
+      connectionTimeoutMs: isRender && resendApiKey ? 3500 : 8000,
+    });
 
-      if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          name?: string;
-        };
-        const errorMsg = errorData.message || `HTTP ${response.status}`;
-        console.error(
-          `[WorkPulse Email Error] Resend API returned error (HTTP ${response.status}):`,
-          errorMsg
-        );
-
-        let userMsg = `Resend email delivery failed: ${errorMsg}`;
-        if (errorMsg.toLowerCase().includes("domain") && errorMsg.toLowerCase().includes("not verified")) {
-          userMsg =
-            "Email domain is not verified in Resend. Please set EMAIL_FROM to onboarding@resend.dev or verify your domain at resend.com.";
-        } else if (response.status === 401 || response.status === 403) {
-          userMsg = "Resend API key is invalid or unauthorized. Please verify RESEND_API_KEY.";
-        }
-
-        return {
-          success: false,
-          error: userMsg,
-        };
-      }
-
-      const result = (await response.json()) as { id?: string };
-      return {
-        success: true,
-        messageId: result.id,
-      };
-    } catch (err) {
-      clearTimeout(timeoutId);
-      const isAbort = err instanceof Error && err.name === "AbortError";
-      const errMsg = isAbort ? "Connection to Resend API timed out (5s limit)" : err instanceof Error ? err.message : "Network error";
-      console.error(
-        "[WorkPulse Email Error] Network exception connecting to Resend API:",
-        errMsg
-      );
-      return {
-        success: false,
-        error: isAbort ? "Email provider request timed out. Please try again." : "Network error delivering email.",
-      };
+    if (smtpAttempt.result.success) {
+      return smtpAttempt.result;
     }
+
+    // If SMTP failed due to network/port reachability AND Resend is configured, fall back to Resend HTTPS (port 443)
+    if (smtpAttempt.isConnectivityFailure && resendApiKey) {
+      console.warn(
+        "[WorkPulse Email Fallback] SMTP connectivity failed; falling back to Resend HTTPS API (port 443)."
+      );
+      return sendViaResend({
+        apiKey: resendApiKey,
+        fromAddress: resolveResendFromAddress(),
+        to,
+        subject,
+        html,
+        text,
+      });
+    }
+
+    return smtpAttempt.result;
   }
 
-  // 2. Production provider integration: SMTP (Nodemailer / Gmail)
-  if (emailUser && emailPass && smtpHost) {
-    try {
-      const cleanPass = emailPass.replace(/\s+/g, "");
-      const isGmail =
-        emailUser.toLowerCase().includes("@gmail.com") ||
-        smtpHost.toLowerCase() === "smtp.gmail.com";
-
-      const targetHost = isGmail ? "smtp.gmail.com" : smtpHost;
-      const targetPort = smtpPort || 587;
-      const isSecure = targetPort === 465;
-
-      // When targeting Gmail, using nodemailer's built-in "gmail" service definition
-      // provides optimal connection pooling and avoids firewall port drops
-      const transporter = isGmail
-        ? nodemailer.createTransport({
-            service: "gmail",
-            auth: {
-              user: emailUser.trim(),
-              pass: cleanPass,
-            },
-            connectionTimeout: 8000,
-            greetingTimeout: 8000,
-            socketTimeout: 10000,
-          })
-        : nodemailer.createTransport({
-            host: targetHost,
-            port: targetPort,
-            secure: isSecure,
-            requireTLS: !isSecure,
-            connectionTimeout: 8000,
-            greetingTimeout: 8000,
-            socketTimeout: 10000,
-            auth: {
-              user: emailUser.trim(),
-              pass: cleanPass,
-            },
-            tls: {
-              rejectUnauthorized: process.env.NODE_ENV === "production",
-            },
-          });
-
-      const info = await transporter.sendMail({
-        from: fromAddress,
-        to: to.trim().toLowerCase(),
-        subject,
-        text,
-        html,
-      });
-
-      return {
-        success: true,
-        messageId: info.messageId,
-      };
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : "SMTP error";
-      console.error("[WorkPulse Email Error] SMTP delivery exception:", errMsg);
-
-      let userFriendlyError = `SMTP email delivery failed: ${errMsg}`;
-      if (
-        errMsg.includes("535") ||
-        errMsg.includes("Username and Password not accepted") ||
-        errMsg.includes("Invalid login") ||
-        errMsg.includes("BadCredentials")
-      ) {
-        userFriendlyError =
-          "Email authentication failed. If using Gmail, please ensure EMAIL_PASS is a 16-character Google App Password (not your personal Google account password).";
-      } else if (
-        errMsg.includes("ETIMEDOUT") ||
-        errMsg.includes("ESOCKETTIMEDOUT") ||
-        errMsg.includes("connection timeout") ||
-        errMsg.includes("Greeting never received")
-      ) {
-        userFriendlyError =
-          "Connection to SMTP server timed out. Cloud hosting may restrict direct SMTP ports; please configure EMAIL_USER and EMAIL_PASS on Vercel or use Resend (RESEND_API_KEY).";
-      } else if (errMsg.includes("ECONNREFUSED")) {
-        userFriendlyError =
-          "Connection refused by SMTP server. Please verify SMTP_HOST and SMTP_PORT.";
-      }
-
-      return {
-        success: false,
-        error: userFriendlyError,
-      };
-    }
+  // 2. Resend API (HTTP POST over port 443) when SMTP is not configured
+  if (resendApiKey) {
+    return sendViaResend({
+      apiKey: resendApiKey,
+      fromAddress: resolveResendFromAddress(),
+      to,
+      subject,
+      html,
+      text,
+    });
   }
 
   // 3. Production fail-safe: Never pretend emails were sent if unconfigured in production
